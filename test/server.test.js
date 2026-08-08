@@ -7,9 +7,11 @@ import {
   API_KEY,
   BASE_URL,
   OUTPUT_DIR,
+  TIMEOUT_MS,
   VOICES,
   VERSION,
   safeName,
+  writeUnique,
   generateImage,
   textToSpeech,
   listVoices,
@@ -55,6 +57,10 @@ describe("configuration", () => {
   test("version matches package.json", () => {
     const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
     assert.equal(VERSION, pkg.version);
+  });
+
+  test("has a positive request timeout", () => {
+    assert.ok(Number.isFinite(TIMEOUT_MS) && TIMEOUT_MS > 0);
   });
 });
 
@@ -246,5 +252,87 @@ describe("handlers with mocked fetch", () => {
     });
 
     await assert.rejects(() => listModels(), /NaN API 429: rate limited/);
+  });
+
+  test("nanRequest passes an abort signal and reports timeouts", async () => {
+    let sawSignal = false;
+    mockFetch(async (url, opts) => {
+      sawSignal = opts.signal instanceof AbortSignal;
+      throw Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+    });
+
+    await assert.rejects(() => listModels(), /timed out after \d+ms/);
+    assert.ok(sawSignal, "fetch should receive an AbortSignal");
+  });
+
+  test("generateImage never overwrites an existing file", async () => {
+    let call = 0;
+    mockFetch(async () =>
+      jsonResponse({ data: [{ b64_json: Buffer.from(`img-${++call}`).toString("base64") }] })
+    );
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    const first = await generateImage({ prompt: "un faro al atardecer" });
+    const second = await generateImage({ prompt: "un faro al atardecer" });
+
+    const p1 = first.content[0].text.match(/saved to (\S+)/)[1];
+    const p2 = second.content[0].text.match(/saved to (\S+)/)[1];
+
+    assert.notEqual(p1, p2, "second call must not reuse the first path");
+    assert.equal(fs.readFileSync(p1, "utf8"), "img-1", "first file must survive");
+    assert.equal(fs.readFileSync(p2, "utf8"), "img-2");
+    assert.deepEqual(fs.readdirSync(outDir).sort(), ["un-faro-al-atardecer-2.png", "un-faro-al-atardecer.png"]);
+  });
+
+  test("textToSpeech never overwrites an existing file", async () => {
+    let call = 0;
+    mockFetch(async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => Buffer.from(`audio-${++call}`),
+    }));
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    await textToSpeech({ text: "hola" });
+    await textToSpeech({ text: "hola" });
+
+    assert.deepEqual(fs.readdirSync(outDir).sort(), ["hola-2.mp3", "hola.mp3"]);
+    assert.equal(fs.readFileSync(path.join(outDir, "hola.mp3"), "utf8"), "audio-1");
+  });
+
+  test("generateImage numbers multiple images and keeps them unique across calls", async () => {
+    mockFetch(async () =>
+      jsonResponse({
+        data: [
+          { b64_json: Buffer.from("a").toString("base64") },
+          { b64_json: Buffer.from("b").toString("base64") },
+        ],
+      })
+    );
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    await generateImage({ prompt: "gatos", n: 2 });
+    await generateImage({ prompt: "gatos", n: 2 });
+
+    const files = fs.readdirSync(outDir);
+    assert.equal(files.length, 4, `expected 4 distinct files, got ${files.join(", ")}`);
+  });
+
+  test("writeUnique keeps writes inside the output dir", () => {
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    const p = writeUnique("../../etc/hostname", ".png", "", Buffer.from("x"));
+    assert.ok(path.resolve(p).startsWith(path.resolve(outDir)));
+    assert.ok(!p.includes(".."));
+  });
+
+  test("writeUnique creates the output dir if it is missing", () => {
+    const nested = path.join(process.env.NAN_OUTPUT_DIR, "nested", "deeper");
+    process.env.NAN_OUTPUT_DIR = nested;
+    try {
+      const p = writeUnique("hello", ".txt", "", Buffer.from("hi"));
+      assert.equal(fs.readFileSync(p, "utf8"), "hi");
+    } finally {
+      process.env.NAN_OUTPUT_DIR = path.dirname(path.dirname(nested));
+    }
   });
 });

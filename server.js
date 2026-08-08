@@ -6,10 +6,10 @@ import fs, { realpathSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
 
 export const API_KEY = process.env.NAN_API_KEY;
 export const BASE_URL = process.env.NAN_BASE_URL || "https://api.nan.builders/v1";
+export const TIMEOUT_MS = Number(process.env.NAN_TIMEOUT_MS) || 180000;
 
 export function getOutputDir() {
   return process.env.NAN_OUTPUT_DIR || path.join(os.homedir(), "nan-mcp-output");
@@ -17,7 +17,7 @@ export function getOutputDir() {
 export const OUTPUT_DIR = getOutputDir();
 
 const pkgUrl = new URL("./package.json", import.meta.url);
-export const VERSION = JSON.parse(readFileSync(pkgUrl, "utf8")).version;
+export const VERSION = JSON.parse(fs.readFileSync(pkgUrl, "utf8")).version;
 
 export function safeName(str, max = 60) {
   return String(str)
@@ -27,7 +27,7 @@ export function safeName(str, max = 60) {
     .slice(0, max) || "output";
 }
 
-function resolveOutputPath(base, ext, suffix = "") {
+export function resolveOutputPath(base, ext, suffix = "") {
   const outRoot = path.resolve(getOutputDir());
   const resolved = path.resolve(outRoot, `${safeName(base)}${suffix}${ext}`);
   if (resolved !== outRoot && !resolved.startsWith(outRoot + path.sep)) {
@@ -36,7 +36,26 @@ function resolveOutputPath(base, ext, suffix = "") {
   return resolved;
 }
 
-async function fetchWithTimeout(url, timeoutMs = 120000) {
+// Writes inside OUTPUT_DIR without ever clobbering an existing file: on collision
+// it appends -2, -3, ... The `wx` flag makes the check-and-write atomic.
+export function writeUnique(base, ext, suffix, data) {
+  const outRoot = path.resolve(getOutputDir());
+  fs.mkdirSync(outRoot, { recursive: true });
+
+  for (let i = 0; i < 1000; i++) {
+    const candidate = resolveOutputPath(base, ext, `${suffix}${i ? `-${i + 1}` : ""}`);
+    try {
+      fs.writeFileSync(candidate, data, { flag: "wx" });
+      return candidate;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+    }
+  }
+
+  throw new Error(`Could not find a free filename for "${safeName(base)}${suffix}${ext}" in ${outRoot}`);
+}
+
+async function downloadBuffer(url, timeoutMs = TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -44,28 +63,49 @@ async function fetchWithTimeout(url, timeoutMs = 120000) {
     if (!res.ok) {
       throw new Error(`Download failed: ${res.status} ${res.statusText}`);
     }
-    return res;
+    return Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error(`Download from ${url} timed out after ${timeoutMs}ms`);
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
 }
 
-export async function nanRequest(endpoint, options = {}) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-      ...(options.body && !(options.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {}),
-    },
-  });
+// The body is consumed here so the timeout covers the whole exchange, not just headers.
+export async function nanRequest(endpoint, { parse = "json", ...options } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`NaN API ${res.status}: ${body}`);
+  try {
+    const res = await fetch(`${BASE_URL}${endpoint}`, {
+      ...options,
+      signal: options.signal || controller.signal,
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        ...(options.body && !(options.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers || {}),
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`NaN API ${res.status}: ${body}`);
+    }
+
+    if (parse === "arrayBuffer") return Buffer.from(await res.arrayBuffer());
+    if (parse === "text") return res.text();
+    return res.json();
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error(`NaN API request to ${endpoint} timed out after ${TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-
-  return res;
 }
 
 export const VOICES = {
@@ -80,22 +120,16 @@ export const VOICES = {
   "Brazilian Portuguese": ["pf_dora", "pm_alex", "pm_santa"],
 };
 
-async function saveGeneratedImages(json, base, suffix = "") {
+async function saveGeneratedImages(json, base) {
   const count = json.data?.length ?? 0;
   const results = [];
   for (let i = 0; i < count; i++) {
     const item = json.data[i];
-    const unique = `${suffix}${count > 1 ? `-${i + 1}` : ""}`;
-    let filePath = resolveOutputPath(base, ".png", unique);
-    if (item.b64_json) {
-      fs.writeFileSync(filePath, Buffer.from(item.b64_json, "base64"));
-    } else {
-      const imgRes = await fetchWithTimeout(item.url);
-      const buf = Buffer.from(await imgRes.arrayBuffer());
-      filePath = resolveOutputPath(base, ".png", unique);
-      fs.writeFileSync(filePath, buf);
-    }
-    results.push({ path: filePath, url: item.url || null });
+    const suffix = count > 1 ? `-${i + 1}` : "";
+    const buf = item.b64_json
+      ? Buffer.from(item.b64_json, "base64")
+      : await downloadBuffer(item.url);
+    results.push({ path: writeUnique(base, ".png", suffix, buf), url: item.url || null });
   }
   return results;
 }
@@ -110,11 +144,10 @@ export async function generateImage({ prompt, size, n, seed, guidance, outputNam
     ...(guidance !== undefined ? { guidance } : {}),
   };
 
-  const res = await nanRequest("/images/generations", {
+  const json = await nanRequest("/images/generations", {
     method: "POST",
     body: JSON.stringify(body),
   });
-  const json = await res.json();
   const results = await saveGeneratedImages(json, outputName || prompt);
 
   return {
@@ -141,14 +174,13 @@ export async function textToSpeech({ text, voice, format, speed, outputName }) {
     ...(speed ? { speed } : {}),
   };
 
-  const res = await nanRequest("/audio/speech", {
+  const buf = await nanRequest("/audio/speech", {
     method: "POST",
     body: JSON.stringify(body),
+    parse: "arrayBuffer",
   });
-  const buf = Buffer.from(await res.arrayBuffer());
   const ext = format || "mp3";
-  const filePath = resolveOutputPath(outputName || text, `.${ext}`);
-  fs.writeFileSync(filePath, buf);
+  const filePath = writeUnique(outputName || text, `.${ext}`, "", buf);
 
   return {
     content: [{ type: "text", text: `Audio saved to ${filePath} (${buf.length} bytes)` }],
@@ -166,11 +198,10 @@ export async function speechToText({ file, language, verbose }) {
   if (language) form.append("language", language);
   form.append("response_format", verbose ? "verbose_json" : "json");
 
-  const res = await nanRequest("/audio/transcriptions", {
+  const json = await nanRequest("/audio/transcriptions", {
     method: "POST",
     body: form,
   });
-  const json = await res.json();
 
   const text = verbose
     ? JSON.stringify(json, null, 2)
@@ -180,8 +211,7 @@ export async function speechToText({ file, language, verbose }) {
 }
 
 export async function listModels() {
-  const res = await nanRequest("/models");
-  const json = await res.json();
+  const json = await nanRequest("/models");
   const lines = (json.data || []).map((m) => `${m.id} (${m.owned_by})`);
   return { content: [{ type: "text", text: lines.join("\n") || "No models found" }] };
 }
@@ -193,11 +223,10 @@ export async function embed({ input, encoding_format }) {
     ...(encoding_format ? { encoding_format } : {}),
   };
 
-  const res = await nanRequest("/embeddings", {
+  const json = await nanRequest("/embeddings", {
     method: "POST",
     body: JSON.stringify(body),
   });
-  const json = await res.json();
 
   const n = (json.data || []).length;
   const dims = json.data?.[0]?.embedding?.length ?? 0;
@@ -221,11 +250,10 @@ export async function rerank({ query, documents, top_n }) {
     ...(top_n ? { top_n } : {}),
   };
 
-  const res = await nanRequest("/rerank", {
+  const json = await nanRequest("/rerank", {
     method: "POST",
     body: JSON.stringify(body),
   });
-  const json = await res.json();
 
   const lines = (json.results || []).map(
     (r) => `[${r.relevance_score.toFixed(4)}] (orig index ${r.index}) ${r.document?.text || ""}`
@@ -251,11 +279,10 @@ export async function editImage({ prompt, images, size, n, seed, guidance, outpu
   if (seed !== undefined) form.append("seed", String(seed));
   if (guidance !== undefined) form.append("guidance", String(guidance));
 
-  const res = await nanRequest("/images/edits", {
+  const json = await nanRequest("/images/edits", {
     method: "POST",
     body: form,
   });
-  const json = await res.json();
   const results = await saveGeneratedImages(json, outputName || prompt);
 
   return {

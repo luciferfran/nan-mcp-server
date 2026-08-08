@@ -1,8 +1,8 @@
 # NaN MCP Server
 
-![Version](https://img.shields.io/badge/version-1.0.4-blue)
+![Version](https://img.shields.io/badge/version-1.0.5-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-339933?logo=nodedotjs&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-22%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-29%20passed-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 [![MCP](https://img.shields.io/badge/MCP-SDK%201.30-blueviolet)](https://modelcontextprotocol.io)
 
@@ -213,6 +213,7 @@ Una vez conectado, pide al agente:
 | `NAN_API_KEY` | Sí | API key de NaN |
 | `NAN_BASE_URL` | No | Base URL de la API (default `https://api.nan.builders/v1`) |
 | `NAN_OUTPUT_DIR` | No | Directorio de salida (default `~/nan-mcp-output`) |
+| `NAN_TIMEOUT_MS` | No | Timeout por petición en ms (default `180000`, 3 min) |
 
 ## Desarrollo
 
@@ -255,7 +256,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 
 ## Notas
 
-- Las imágenes y audios se guardan en `~/nan-mcp-output/` (configurable con `NAN_OUTPUT_DIR`). Los nombres de archivo se sanitizan (sin path traversal) y nunca se sobrescriben archivos existentes.
+- Las imágenes y audios se guardan en `~/nan-mcp-output/` (configurable con `NAN_OUTPUT_DIR`). Los nombres se sanitizan (sin path traversal) y nunca se sobrescriben archivos existentes: si el nombre ya está ocupado se añade `-2`, `-3`, etc.
 - Los archivos de entrada (STT / edit_image) se cargan en memoria; para archivos muy grandes conviene dividirlos.
 - El servidor no contiene ningún secreto en el código: solo lee `NAN_API_KEY` del entorno.
 

@@ -1,6 +1,6 @@
 {
   "name": "nan-mcp-server",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "MCP server exposing NaN API tools: image generation/editing (flux-2-klein), TTS (kokoro), STT (whisper), embeddings and rerank",
   "type": "module",
   "bin": {
@@ -31,10 +31,13 @@
     "agent"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/luciferfran/nan-mcp-server",
+  "homepage": "https://github.com/luciferfran/nan-mcp-server#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/luciferfran/nan-mcp-server"
+    "url": "git+https://github.com/luciferfran/nan-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/luciferfran/nan-mcp-server/issues"
   },
   "engines": {
     "node": ">=18"
