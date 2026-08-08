@@ -1,0 +1,44 @@
+{
+  "name": "nan-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server exposing NaN API tools: image generation/editing (flux-2-klein), TTS (kokoro), STT (whisper), embeddings and rerank",
+  "type": "module",
+  "bin": {
+    "nan-mcp-server": "./server.js"
+  },
+  "files": [
+    "server.js"
+  ],
+  "scripts": {
+    "start": "node server.js",
+    "test": "NAN_API_KEY=${NAN_API_KEY:-test} node --test test/server.test.js",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "nan",
+    "nan.builders",
+    "flux",
+    "kokoro",
+    "whisper",
+    "tts",
+    "stt",
+    "image-generation",
+    "embeddings",
+    "rerank",
+    "ai",
+    "agent"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luciferfran/nan-mcp-server"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  }
+}
