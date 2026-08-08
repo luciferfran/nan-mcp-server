@@ -35,25 +35,25 @@ El paquete se distribuye por [npm](https://www.npmjs.com/package/nan-mcp-server)
 
 ```bash
 export NAN_API_KEY="sk-tu-key-aqui"
-npx -y nan-mcp-server@1.0.5
+npx -y nan-mcp-server@1.0.6
 ```
 
 Con otro gestor de paquetes, si ya lo usas:
 
 ```bash
-pnpm dlx nan-mcp-server@1.0.5    # pnpm
-yarn dlx nan-mcp-server@1.0.5    # yarn
-bunx nan-mcp-server@1.0.5        # bun
+pnpm dlx nan-mcp-server@1.0.6    # pnpm
+yarn dlx nan-mcp-server@1.0.6    # yarn
+bunx nan-mcp-server@1.0.6        # bun
 ```
 
 O instálalo globalmente:
 
 ```bash
-npm install -g nan-mcp-server@1.0.5   # o: pnpm add -g / bun add -g
+npm install -g nan-mcp-server@1.0.6   # o: pnpm add -g / bun add -g
 nan-mcp-server
 ```
 
-> **Sobre la versión fijada**: los ejemplos usan `@1.0.5` en lugar de `@latest` a propósito. Con `@latest`, cada arranque descarga la última versión publicada, así que cualquier versión futura —incluida una publicada por una cuenta comprometida— se ejecutaría en tu máquina automáticamente. Fijar la versión te deja decidir cuándo actualizar; consulta las [releases](https://github.com/luciferfran/nan-mcp-server/releases) y sube el número cuando quieras. Si prefieres actualizaciones automáticas, sustituye `@1.0.5` por `@latest` en cualquiera de los ejemplos.
+> **Sobre la versión fijada**: los ejemplos fijan una versión exacta en lugar de `@latest`, a propósito. Con `@latest`, cada arranque descarga la última versión publicada, así que cualquier versión futura —incluida una publicada por una cuenta comprometida— se ejecutaría en tu máquina automáticamente. Fijar la versión te deja decidir cuándo actualizar; consulta las [releases](https://github.com/luciferfran/nan-mcp-server/releases) y sube el número cuando quieras. Si prefieres actualizaciones automáticas, sustituye la versión por `@latest` en cualquiera de los ejemplos.
 
 ## Configuración
 
@@ -73,7 +73,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
   "mcp": {
     "nan-media": {
       "type": "local",
-      "command": ["npx", "-y", "nan-mcp-server@1.0.5"],
+      "command": ["npx", "-y", "nan-mcp-server@1.0.6"],
       "environment": {
         "NAN_API_KEY": "{env:NAN_API_KEY}"
       }
@@ -91,7 +91,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
 
 ```bash
 claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
-  npx -y nan-mcp-server@1.0.5
+  npx -y nan-mcp-server@1.0.6
 ```
 
 **O en `.mcp.json`:**
@@ -102,7 +102,7 @@ claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
     "nan-media": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.0.5"],
+      "args": ["-y", "nan-mcp-server@1.0.6"],
       "env": {
         "NAN_API_KEY": "${NAN_API_KEY}"
       }
@@ -125,7 +125,7 @@ bearer_token_env_var = "NAN_API_KEY"
 
 [mcp_servers.nan-media]
 command = "npx"
-args = ["-y", "nan-mcp-server@1.0.5"]
+args = ["-y", "nan-mcp-server@1.0.6"]
 ```
 
 > **Seguridad**: codex lee `NAN_API_KEY` de una variable de entorno — el servidor remoto vía `bearer_token_env_var` y el servidor local la hereda del shell. Así `config.toml` se puede subir a GitHub sin exponer secretos.
@@ -153,7 +153,7 @@ Crea `~/.config/mcp/mcp.json` (config compartido MCP estándar):
     },
     "nan-media": {
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.0.5"],
+      "args": ["-y", "nan-mcp-server@1.0.6"],
       "env": {
         "NAN_API_KEY": "$env:NAN_API_KEY"
       }
@@ -192,7 +192,7 @@ Luego usa `--provider nan --model <id>` (p.ej. `pi --provider nan --model deepse
 En la configuración de MCP del cliente, añade un servidor stdio:
 
 ```
-Comando: npx -y nan-mcp-server@1.0.5
+Comando: npx -y nan-mcp-server@1.0.6
 Variables: NAN_API_KEY=tu-clave-de-nan-builders (no la incluyas en el config versionado)
 ```
 
