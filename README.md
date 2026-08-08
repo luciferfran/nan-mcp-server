@@ -1,8 +1,8 @@
 # NaN MCP Server
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.4-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-339933?logo=nodedotjs&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-11%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-22%20passed-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 [![MCP](https://img.shields.io/badge/MCP-SDK%201.30-blueviolet)](https://modelcontextprotocol.io)
 
@@ -196,6 +196,16 @@ Una vez conectado, pide al agente:
 - "Transcribe el audio /ruta/audio.mp3"
 - "Reordena estos documentos según la query X"
 
+## Límites de la API
+
+| Recurso | Límite |
+|---|---|
+| Generación/edición de imágenes | 100 req/mes por usuario, 1 req/s (burst 3) |
+| Tamaño máximo archivo (STT / edit_image) | 25 MB por archivo |
+| Audios para transcripción | máx. ~2 min por archivo (timeout 524 si supera) |
+| Imágenes de referencia (edit_image) | hasta 4 |
+| Web search (vía MCP remoto) | 20 req/min, 500 req/día |
+
 ## Variables de entorno
 
 | Variable | Obligatoria | Descripción |
@@ -245,7 +255,8 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 
 ## Notas
 
-- Límites de la API: generación de imágenes 100 req/mes; web search 20 req/min (este servidor no incluye web_search, se expone vía el [MCP remoto oficial](https://api.nan.builders/mcp)).
+- Las imágenes y audios se guardan en `~/nan-mcp-output/` (configurable con `NAN_OUTPUT_DIR`). Los nombres de archivo se sanitizan (sin path traversal) y nunca se sobrescriben archivos existentes.
+- Los archivos de entrada (STT / edit_image) se cargan en memoria; para archivos muy grandes conviene dividirlos.
 - El servidor no contiene ningún secreto en el código: solo lee `NAN_API_KEY` del entorno.
 
 ## Licencia

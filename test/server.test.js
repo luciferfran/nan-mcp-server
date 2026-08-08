@@ -1,6 +1,43 @@
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { API_KEY, BASE_URL, OUTPUT_DIR, VOICES, safeName } from "../server.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  API_KEY,
+  BASE_URL,
+  OUTPUT_DIR,
+  VOICES,
+  VERSION,
+  safeName,
+  generateImage,
+  textToSpeech,
+  listVoices,
+  listModels,
+  embed,
+  rerank,
+} from "../server.js";
+
+const ORIGINAL_FETCH = globalThis.fetch;
+
+function mockFetch(handler) {
+  globalThis.fetch = async (url, opts) => {
+    return handler(url, opts);
+  };
+}
+
+function jsonResponse(obj) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => obj,
+    arrayBuffer: async () => Buffer.from(JSON.stringify(obj)),
+  };
+}
+
+function restoreFetch() {
+  globalThis.fetch = ORIGINAL_FETCH;
+}
 
 describe("configuration", () => {
   test("requires NAN_API_KEY", () => {
@@ -13,6 +50,11 @@ describe("configuration", () => {
 
   test("output directory defaults under home", () => {
     assert.ok(OUTPUT_DIR.endsWith("nan-mcp-output"));
+  });
+
+  test("version matches package.json", () => {
+    const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    assert.equal(VERSION, pkg.version);
   });
 });
 
@@ -59,5 +101,150 @@ describe("safeName", () => {
   test("truncates to max length", () => {
     const long = "x".repeat(200);
     assert.ok(safeName(long).length <= 60);
+  });
+
+  test("sanitizes path traversal attempts", () => {
+    assert.equal(safeName("../../etc/passwd"), "etc-passwd");
+    assert.equal(safeName("../secret"), "secret");
+  });
+});
+
+describe("handlers with mocked fetch", () => {
+  beforeEach(() => {
+    process.env.NAN_OUTPUT_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "nan-mcp-test-"));
+  });
+
+  afterEach(() => {
+    restoreFetch();
+    fs.rmSync(process.env.NAN_OUTPUT_DIR, { recursive: true, force: true });
+  });
+
+  test("generateImage sends correct request body and saves b64 image", async () => {
+    let capturedBody;
+    mockFetch(async (url, opts) => {
+      assert.equal(url, `${BASE_URL}/images/generations`);
+      assert.match(opts.headers.Authorization, /^Bearer /);
+      capturedBody = JSON.parse(opts.body);
+      return jsonResponse({
+        data: [{ b64_json: Buffer.from("fake-image-bytes").toString("base64") }],
+      });
+    });
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    const result = await generateImage({ prompt: "A Test! Image", size: "512x512", n: 1 });
+
+    assert.equal(capturedBody.model, "flux-2-klein");
+    assert.equal(capturedBody.prompt, "A Test! Image");
+    assert.equal(capturedBody.size, "512x512");
+
+    const text = result.content[0].text;
+    assert.match(text, new RegExp(outDir));
+    assert.match(text, /\.png/);
+    assert.ok(fs.existsSync(path.join(outDir, "a-test-image.png")));
+  });
+
+  test("generateImage sanitizes path traversal in outputName", async () => {
+    mockFetch(async () => {
+      return jsonResponse({
+        data: [{ b64_json: Buffer.from("fake").toString("base64") }],
+      });
+    });
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    const result = await generateImage({ prompt: "img", outputName: "../../etc/hostname" });
+
+    const filePath = result.content[0].text.match(/saved to ([^\s]+)/)[1];
+    assert.ok(path.resolve(filePath).startsWith(path.resolve(outDir)), "file should stay inside output dir");
+    assert.ok(!filePath.includes(".."), "no path traversal in saved path");
+  });
+
+  test("textToSpeech sends correct body and saves audio", async () => {
+    let capturedBody;
+    mockFetch(async (url, opts) => {
+      assert.equal(url, `${BASE_URL}/audio/speech`);
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, arrayBuffer: async () => Buffer.from("audio-bytes") };
+    });
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    const result = await textToSpeech({ text: "Hola mundo", voice: "ef_dora", format: "mp3" });
+
+    assert.equal(capturedBody.model, "kokoro");
+    assert.equal(capturedBody.voice, "ef_dora");
+    assert.match(result.content[0].text, /Audio saved to/);
+    assert.ok(fs.existsSync(path.join(outDir, "hola-mundo.mp3")));
+  });
+
+  test("textToSpeech sanitizes path traversal in outputName", async () => {
+    mockFetch(async () => {
+      return { ok: true, status: 200, arrayBuffer: async () => Buffer.from("audio") };
+    });
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    const result = await textToSpeech({ text: "hola", outputName: "../../.ssh/authorized_keys" });
+
+    const filePath = result.content[0].text.match(/saved to ([^\s]+)/)[1];
+    assert.ok(path.resolve(filePath).startsWith(path.resolve(outDir)), "file should stay inside output dir");
+    assert.ok(!filePath.includes(".."), "no path traversal in saved path");
+  });
+
+  test("listVoices returns grouped voices", async () => {
+    const result = await listVoices();
+    assert.match(result.content[0].text, /Spanish: ef_dora, em_alex, em_santa/);
+  });
+
+  test("listModels returns model ids", async () => {
+    mockFetch(async () => {
+      return jsonResponse({
+        data: [
+          { id: "deepseek-v4-flash", owned_by: "openai" },
+          { id: "flux-2-klein", owned_by: "nan" },
+        ],
+      });
+    });
+
+    const result = await listModels();
+    assert.match(result.content[0].text, /deepseek-v4-flash \(openai\)/);
+    assert.match(result.content[0].text, /flux-2-klein \(nan\)/);
+  });
+
+  test("embed returns summary without dumping vectors", async () => {
+    mockFetch(async () => {
+      return jsonResponse({
+        data: [{ embedding: new Array(4096).fill(0.1) }],
+        usage: { prompt_tokens: 5 },
+      });
+    });
+
+    const result = await embed({ input: "hello" });
+    assert.match(result.content[0].text, /4096 dimensions/);
+    assert.ok(result.content[0].text.length < 500, "should not dump 4096 floats");
+  });
+
+  test("rerank returns ordered relevance scores", async () => {
+    mockFetch(async () => {
+      return jsonResponse({
+        results: [
+          { index: 2, relevance_score: 0.9, document: { text: "Paris" } },
+          { index: 0, relevance_score: 0.5, document: { text: "Berlin" } },
+        ],
+      });
+    });
+
+    const result = await rerank({
+      query: "capital of France",
+      documents: ["Berlin", "London", "Paris"],
+    });
+    const text = result.content[0].text;
+    assert.match(text, /\[0\.9000\] \(orig index 2\) Paris/);
+    assert.match(text, /\[0\.5000\] \(orig index 0\) Berlin/);
+  });
+
+  test("nanRequest throws on non-2xx response", async () => {
+    mockFetch(async () => {
+      return { ok: false, status: 429, text: async () => "rate limited" };
+    });
+
+    await assert.rejects(() => listModels(), /NaN API 429: rate limited/);
   });
 });
