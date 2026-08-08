@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/nan-mcp-server)](https://www.npmjs.com/package/nan-mcp-server)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-339933?logo=nodedotjs&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-29%20passed-brightgreen)
+[![CI](https://github.com/luciferfran/nan-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/luciferfran/nan-mcp-server/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-green)
 [![MCP](https://img.shields.io/badge/MCP-SDK%201.30-blueviolet)](https://modelcontextprotocol.io)
 
@@ -223,6 +223,7 @@ Una vez conectado, pide al agente:
 nan-mcp-server/
 ├── server.js            # Servidor MCP + herramientas
 ├── test/server.test.js  # Tests (node:test, sin dependencias extra)
+├── .github/workflows/   # ci.yml (tests) + publish.yml (npm)
 ├── package.json
 └── README.md
 ```
@@ -252,7 +253,8 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 
 - El código no contiene secretos: `NAN_API_KEY` se lee solo del entorno.
 - El `.gitignore` excluye `node_modules/`, logs y `.env`.
-- Para CI, basta con `npm install && npm test`.
+- `.github/workflows/ci.yml` ejecuta los tests en cada push y PR a `main` sobre Node 18, 20, 22 y 24.
+- `.github/workflows/publish.yml` publica en npm al crear un release en GitHub, vía trusted publishing (OIDC), sin token en secrets.
 
 ## Notas
 
