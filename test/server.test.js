@@ -62,6 +62,17 @@ describe("configuration", () => {
   test("has a positive request timeout", () => {
     assert.ok(Number.isFinite(TIMEOUT_MS) && TIMEOUT_MS > 0);
   });
+
+  // The README pins an exact version in every install example; this keeps those
+  // examples from drifting behind a version bump.
+  test("README examples pin the current version", () => {
+    const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
+    const pinned = [...readme.matchAll(/nan-mcp-server@(\d+\.\d+\.\d+)/g)].map((m) => m[1]);
+
+    assert.ok(pinned.length > 0, "README should pin the version in its examples");
+    const stale = [...new Set(pinned)].filter((v) => v !== VERSION);
+    assert.deepEqual(stale, [], `README pins ${stale.join(", ")} but package.json is ${VERSION}`);
+  });
 });
 
 describe("VOICES", () => {
