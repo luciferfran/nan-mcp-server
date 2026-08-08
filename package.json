@@ -4,7 +4,7 @@
   "description": "MCP server exposing NaN API tools: image generation/editing (flux-2-klein), TTS (kokoro), STT (whisper), embeddings and rerank",
   "type": "module",
   "bin": {
-    "nan-mcp-server": "./server.js"
+    "nan-mcp-server": "server.js"
   },
   "files": [
     "server.js"
@@ -33,7 +33,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/luciferfran/nan-mcp-server"
+    "url": "git+https://github.com/luciferfran/nan-mcp-server.git"
   },
   "engines": {
     "node": ">=18"
