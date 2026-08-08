@@ -1,6 +1,6 @@
 # NaN MCP Server
 
-![Version](https://img.shields.io/badge/version-1.0.5-blue)
+[![npm](https://img.shields.io/npm/v/nan-mcp-server)](https://www.npmjs.com/package/nan-mcp-server)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-339933?logo=nodedotjs&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-29%20passed-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
