@@ -120,6 +120,15 @@ export const VOICES = {
   "Brazilian Portuguese": ["pf_dora", "pm_alex", "pm_santa"],
 };
 
+// flux-2-klein serves JPEG today even though it once served PNG, so the extension
+// is read from the magic bytes of the payload we actually got. Naming a JPEG
+// ".png" leaves files that strict readers reject. Unknown formats keep .png.
+export function imageExtension(buf) {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return ".jpg";
+  if (buf.length >= 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return ".webp";
+  return ".png";
+}
+
 async function saveGeneratedImages(json, base) {
   const count = json.data?.length ?? 0;
   const results = [];
@@ -129,7 +138,7 @@ async function saveGeneratedImages(json, base) {
     const buf = item.b64_json
       ? Buffer.from(item.b64_json, "base64")
       : await downloadBuffer(item.url);
-    results.push({ path: writeUnique(base, ".png", suffix, buf), url: item.url || null });
+    results.push({ path: writeUnique(base, imageExtension(buf), suffix, buf), url: item.url || null });
   }
   return results;
 }

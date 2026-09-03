@@ -12,6 +12,7 @@ import {
   VERSION,
   safeName,
   writeUnique,
+  imageExtension,
   generateImage,
   textToSpeech,
   listVoices,
@@ -345,5 +346,32 @@ describe("handlers with mocked fetch", () => {
     } finally {
       process.env.NAN_OUTPUT_DIR = path.dirname(path.dirname(nested));
     }
+  });
+
+  test("generateImage names the file after the bytes it received, not the endpoint", async () => {
+    // The API switched flux-2-klein to JPEG without changing the endpoint; a
+    // hard-coded ".png" here produced files that lied about their format.
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("JFIF")]);
+    mockFetch(async () => jsonResponse({ data: [{ b64_json: jpeg.toString("base64") }] }));
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    await generateImage({ prompt: "manzana" });
+
+    assert.deepEqual(fs.readdirSync(outDir), ["manzana.jpg"]);
+  });
+});
+
+describe("imageExtension", () => {
+  test("detects the format from the magic bytes", () => {
+    assert.equal(imageExtension(Buffer.from([0xff, 0xd8, 0xff, 0xe0])), ".jpg");
+    assert.equal(imageExtension(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), ".png");
+    assert.equal(imageExtension(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBP")])), ".webp");
+  });
+
+  test("falls back to .png for anything unrecognised", () => {
+    assert.equal(imageExtension(Buffer.from("whatever")), ".png");
+    assert.equal(imageExtension(Buffer.alloc(0)), ".png");
+    // "RIFF" alone is a WAV or AVI container, not a WebP image.
+    assert.equal(imageExtension(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVE")])), ".png");
   });
 });
