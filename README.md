@@ -174,7 +174,7 @@ Para usar los modelos de NaN en Pi, define el proveedor en `~/.pi/agent/models.j
       "api": "openai-completions",
       "apiKey": "$NAN_API_KEY",
       "models": [
-        { "id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash", "reasoning": true, "input": ["text"], "contextWindow": 1048576 },
+        { "id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash", "reasoning": true, "input": ["text", "image"], "contextWindow": 1048576 },
         { "id": "qwen3.6", "name": "Qwen 3.6", "reasoning": true, "input": ["text", "image"], "contextWindow": 262144 }
       ]
     }
