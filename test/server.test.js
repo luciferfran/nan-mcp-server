@@ -14,7 +14,9 @@ import {
   writeUnique,
   imageExtension,
   generateImage,
+  editImage,
   textToSpeech,
+  speechToText,
   listVoices,
   listModels,
   embed,
@@ -40,6 +42,18 @@ function jsonResponse(obj) {
 
 function restoreFetch() {
   globalThis.fetch = ORIGINAL_FETCH;
+}
+
+// Input files for the handlers that upload something. They live outside the
+// output dir so the assertions that read it back never see an intruder.
+const inputDirs = [];
+
+function tempFile(name, contents) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nan-mcp-input-"));
+  inputDirs.push(dir);
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, contents);
+  return file;
 }
 
 describe("configuration", () => {
@@ -135,6 +149,7 @@ describe("handlers with mocked fetch", () => {
   afterEach(() => {
     restoreFetch();
     fs.rmSync(process.env.NAN_OUTPUT_DIR, { recursive: true, force: true });
+    while (inputDirs.length) fs.rmSync(inputDirs.pop(), { recursive: true, force: true });
   });
 
   test("generateImage sends correct request body and saves b64 image", async () => {
@@ -358,6 +373,140 @@ describe("handlers with mocked fetch", () => {
     await generateImage({ prompt: "manzana" });
 
     assert.deepEqual(fs.readdirSync(outDir), ["manzana.jpg"]);
+  });
+
+  test("speechToText uploads the file and returns the transcription", async () => {
+    const audio = tempFile("nota de voz.mp3", "audio-bytes");
+    let form;
+    mockFetch(async (url, opts) => {
+      assert.equal(url, `${BASE_URL}/audio/transcriptions`);
+      assert.match(opts.headers.Authorization, /^Bearer /);
+      // A multipart body must not carry the JSON content type, or the boundary is lost.
+      assert.equal(opts.headers["Content-Type"], undefined);
+      form = opts.body;
+      return jsonResponse({ text: "hola mundo" });
+    });
+
+    const result = await speechToText({ file: audio, language: "es" });
+
+    assert.ok(form instanceof FormData);
+    assert.equal(form.get("model"), "whisper");
+    assert.equal(form.get("language"), "es");
+    assert.equal(form.get("response_format"), "json");
+    assert.equal(form.get("file").name, "nota de voz.mp3");
+    assert.equal(await form.get("file").text(), "audio-bytes");
+    assert.equal(result.content[0].text, "hola mundo");
+  });
+
+  test("speechToText asks for verbose_json and returns the whole payload", async () => {
+    let form;
+    mockFetch(async (_url, opts) => {
+      form = opts.body;
+      return jsonResponse({ text: "hola", segments: [{ start: 0, end: 1.5, text: "hola" }] });
+    });
+
+    const result = await speechToText({ file: tempFile("a.wav", "x"), verbose: true });
+
+    assert.equal(form.get("response_format"), "verbose_json");
+    assert.equal(form.get("language"), null);
+    assert.deepEqual(JSON.parse(result.content[0].text).segments, [{ start: 0, end: 1.5, text: "hola" }]);
+  });
+
+  test("speechToText says so when the API returns no text", async () => {
+    mockFetch(async () => jsonResponse({}));
+    const result = await speechToText({ file: tempFile("mudo.mp3", "x") });
+    assert.equal(result.content[0].text, "No transcription returned");
+  });
+
+  test("speechToText reports a missing file before calling the API", async () => {
+    mockFetch(async () => assert.fail("the API should not be reached"));
+    await assert.rejects(
+      speechToText({ file: path.join(process.env.NAN_OUTPUT_DIR, "no-existe.mp3") }),
+      /File not found/
+    );
+  });
+
+  test("editImage uploads every reference image and saves the result", async () => {
+    const gato = tempFile("gato.png", "bytes-gato");
+    const perro = tempFile("perro.png", "bytes-perro");
+    let url, form;
+    mockFetch(async (u, opts) => {
+      url = u;
+      form = opts.body;
+      return jsonResponse({ data: [{ b64_json: Buffer.from("edited").toString("base64") }] });
+    });
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    const result = await editImage({
+      prompt: "Ponlos en la playa",
+      images: [gato, perro],
+      size: "512x512",
+      seed: 7,
+      guidance: 3.5,
+    });
+
+    assert.equal(url, `${BASE_URL}/images/edits`);
+    assert.equal(form.get("model"), "flux-2-klein");
+    assert.equal(form.get("prompt"), "Ponlos en la playa");
+    assert.equal(form.get("size"), "512x512");
+    assert.equal(form.get("seed"), "7");
+    assert.equal(form.get("guidance"), "3.5");
+    // The API keys the files by "image[]", and only the basename travels.
+    assert.deepEqual(form.getAll("image[]").map((f) => f.name), ["gato.png", "perro.png"]);
+    assert.equal(await form.getAll("image[]")[1].text(), "bytes-perro");
+    assert.match(result.content[0].text, /Image saved to/);
+    assert.deepEqual(fs.readdirSync(outDir), ["ponlos-en-la-playa.png"]);
+  });
+
+  test("editImage names the file after the bytes it received, not the endpoint", async () => {
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("JFIF")]);
+    mockFetch(async () => jsonResponse({ data: [{ b64_json: jpeg.toString("base64") }] }));
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    await editImage({ prompt: "retoque", images: [tempFile("in.png", "x")] });
+
+    assert.deepEqual(fs.readdirSync(outDir), ["retoque.jpg"]);
+  });
+
+  test("editImage sanitizes path traversal in outputName", async () => {
+    mockFetch(async () => jsonResponse({ data: [{ b64_json: Buffer.from("x").toString("base64") }] }));
+
+    const outDir = process.env.NAN_OUTPUT_DIR;
+    const result = await editImage({
+      prompt: "img",
+      images: [tempFile("in.png", "x")],
+      outputName: "../../etc/hostname",
+    });
+
+    const filePath = result.content[0].text.match(/saved to ([^\s]+)/)[1];
+    assert.ok(path.resolve(filePath).startsWith(path.resolve(outDir)), "file should stay inside output dir");
+    assert.ok(!filePath.includes(".."), "no path traversal in saved path");
+  });
+
+  test("editImage reports a missing reference image before calling the API", async () => {
+    mockFetch(async () => assert.fail("the API should not be reached"));
+    const existente = tempFile("existe.png", "x");
+
+    await assert.rejects(
+      editImage({ prompt: "mezcla", images: [existente, path.join(path.dirname(existente), "fantasma.png")] }),
+      /File not found: .*fantasma\.png/
+    );
+  });
+
+  test("editImage silently drops reference images past the fourth", async () => {
+    // The schema advertises "up to 4" but accepts any number and slices. This
+    // pins the current behaviour, so turning it into a validation error is a
+    // deliberate change and not an accident.
+    const files = ["a", "b", "c", "d", "e"].map((n) => tempFile(`${n}.png`, n));
+    let form;
+    mockFetch(async (_url, opts) => {
+      form = opts.body;
+      return jsonResponse({ data: [{ b64_json: Buffer.from("x").toString("base64") }] });
+    });
+
+    await editImage({ prompt: "cinco", images: files });
+
+    assert.deepEqual(form.getAll("image[]").map((f) => f.name), ["a.png", "b.png", "c.png", "d.png"]);
   });
 });
 
