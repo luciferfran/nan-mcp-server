@@ -35,21 +35,21 @@ El paquete se distribuye por [npm](https://www.npmjs.com/package/nan-mcp-server)
 
 ```bash
 export NAN_API_KEY="sk-tu-key-aqui"
-npx -y nan-mcp-server@1.0.7
+npx -y nan-mcp-server@1.0.8
 ```
 
 Con otro gestor de paquetes, si ya lo usas:
 
 ```bash
-pnpm dlx nan-mcp-server@1.0.7    # pnpm
-yarn dlx nan-mcp-server@1.0.7    # yarn
-bunx nan-mcp-server@1.0.7        # bun
+pnpm dlx nan-mcp-server@1.0.8    # pnpm
+yarn dlx nan-mcp-server@1.0.8    # yarn
+bunx nan-mcp-server@1.0.8        # bun
 ```
 
 O instálalo globalmente:
 
 ```bash
-npm install -g nan-mcp-server@1.0.7   # o: pnpm add -g / bun add -g
+npm install -g nan-mcp-server@1.0.8   # o: pnpm add -g / bun add -g
 nan-mcp-server
 ```
 
@@ -73,7 +73,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
   "mcp": {
     "nan-media": {
       "type": "local",
-      "command": ["npx", "-y", "nan-mcp-server@1.0.7"],
+      "command": ["npx", "-y", "nan-mcp-server@1.0.8"],
       "environment": {
         "NAN_API_KEY": "{env:NAN_API_KEY}"
       }
@@ -91,7 +91,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
 
 ```bash
 claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
-  npx -y nan-mcp-server@1.0.7
+  npx -y nan-mcp-server@1.0.8
 ```
 
 **O en `.mcp.json`:**
@@ -102,7 +102,7 @@ claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
     "nan-media": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.0.7"],
+      "args": ["-y", "nan-mcp-server@1.0.8"],
       "env": {
         "NAN_API_KEY": "${NAN_API_KEY}"
       }
@@ -125,7 +125,7 @@ bearer_token_env_var = "NAN_API_KEY"
 
 [mcp_servers.nan-media]
 command = "npx"
-args = ["-y", "nan-mcp-server@1.0.7"]
+args = ["-y", "nan-mcp-server@1.0.8"]
 ```
 
 > **Seguridad**: codex lee `NAN_API_KEY` de una variable de entorno — el servidor remoto vía `bearer_token_env_var` y el servidor local la hereda del shell. Así `config.toml` se puede subir a GitHub sin exponer secretos.
@@ -153,7 +153,7 @@ Crea `~/.config/mcp/mcp.json` (config compartido MCP estándar):
     },
     "nan-media": {
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.0.7"],
+      "args": ["-y", "nan-mcp-server@1.0.8"],
       "env": {
         "NAN_API_KEY": "$env:NAN_API_KEY"
       }
@@ -192,7 +192,7 @@ Luego usa `--provider nan --model <id>` (p.ej. `pi --provider nan --model deepse
 En la configuración de MCP del cliente, añade un servidor stdio:
 
 ```
-Comando: npx -y nan-mcp-server@1.0.7
+Comando: npx -y nan-mcp-server@1.0.8
 Variables: NAN_API_KEY=tu-clave-de-nan-builders (no la incluyas en el config versionado)
 ```
 

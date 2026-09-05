@@ -1,6 +1,6 @@
 {
   "name": "nan-mcp-server",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "MCP server exposing NaN API tools: image generation/editing (flux-2-klein), TTS (kokoro), STT (whisper), embeddings and rerank",
   "type": "module",
   "bin": {
