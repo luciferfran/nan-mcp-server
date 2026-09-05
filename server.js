@@ -272,14 +272,15 @@ export async function rerank({ query, documents, top_n }) {
 }
 
 export async function editImage({ prompt, images, size, n, seed, guidance, outputName }) {
-  const files = images.slice(0, 4);
-  for (const f of files) {
+  // The schema caps this at 4; slicing here too would only hide a fifth image
+  // from a caller that bypassed it.
+  for (const f of images) {
     if (!fs.existsSync(f)) throw new Error(`File not found: ${f}`);
   }
 
   const form = new FormData();
   form.append("model", "flux-2-klein");
-  for (const f of files) {
+  for (const f of images) {
     form.append("image[]", new Blob([fs.readFileSync(f)]), path.basename(f));
   }
   form.append("prompt", prompt);
@@ -375,18 +376,22 @@ server.registerTool("rerank", {
   },
 }, rerank);
 
+// Exported so a test can check the contract the client actually sees. The
+// other tools keep their schema inline.
+export const editImageInput = {
+  prompt: z.string().describe("Description of the edit or transformation to apply"),
+  images: z.array(z.string()).min(1).max(4).describe("Absolute paths to reference image files (PNG, JPEG, WebP; up to 4, each < 25MB)"),
+  size: z.string().optional().describe('Image size "WxH" divisible by 16, e.g. 1024x1024, 1536x1024, 1024x1536. Default 1024x1024'),
+  n: z.number().int().min(1).max(4).optional().describe("Number of images to generate (1-4). Default 1"),
+  seed: z.number().optional().describe("Base seed for reproducibility"),
+  guidance: z.number().optional().describe("FLUX guidance scale"),
+  outputName: z.string().optional().describe("Optional base name for the output file(s)"),
+};
+
 server.registerTool("edit_image", {
   title: "Edit Image",
   description: "Edit an image with flux-2-klein image-to-image (NaN API). Takes one or more reference image files and applies a transformation. Returns the saved output image path.",
-  inputSchema: {
-    prompt: z.string().describe("Description of the edit or transformation to apply"),
-    images: z.array(z.string()).describe("Absolute paths to reference image files (PNG, JPEG, WebP; up to 4, each < 25MB)"),
-    size: z.string().optional().describe('Image size "WxH" divisible by 16, e.g. 1024x1024, 1536x1024, 1024x1536. Default 1024x1024'),
-    n: z.number().int().min(1).max(4).optional().describe("Number of images to generate (1-4). Default 1"),
-    seed: z.number().optional().describe("Base seed for reproducibility"),
-    guidance: z.number().optional().describe("FLUX guidance scale"),
-    outputName: z.string().optional().describe("Optional base name for the output file(s)"),
-  },
+  inputSchema: editImageInput,
 }, editImage);
 
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import {
   API_KEY,
   BASE_URL,
@@ -15,6 +16,7 @@ import {
   imageExtension,
   generateImage,
   editImage,
+  editImageInput,
   textToSpeech,
   speechToText,
   listVoices,
@@ -493,10 +495,9 @@ describe("handlers with mocked fetch", () => {
     );
   });
 
-  test("editImage silently drops reference images past the fourth", async () => {
-    // The schema advertises "up to 4" but accepts any number and slices. This
-    // pins the current behaviour, so turning it into a validation error is a
-    // deliberate change and not an accident.
+  test("editImage uploads every image it is handed, without slicing", async () => {
+    // The 4-image cap belongs to the schema. If the handler trimmed as well, a
+    // caller that got past the schema would lose an image with no error.
     const files = ["a", "b", "c", "d", "e"].map((n) => tempFile(`${n}.png`, n));
     let form;
     mockFetch(async (_url, opts) => {
@@ -506,7 +507,10 @@ describe("handlers with mocked fetch", () => {
 
     await editImage({ prompt: "cinco", images: files });
 
-    assert.deepEqual(form.getAll("image[]").map((f) => f.name), ["a.png", "b.png", "c.png", "d.png"]);
+    assert.deepEqual(
+      form.getAll("image[]").map((f) => f.name),
+      ["a.png", "b.png", "c.png", "d.png", "e.png"]
+    );
   });
 });
 
@@ -522,5 +526,25 @@ describe("imageExtension", () => {
     assert.equal(imageExtension(Buffer.alloc(0)), ".png");
     // "RIFF" alone is a WAV or AVI container, not a WebP image.
     assert.equal(imageExtension(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVE")])), ".png");
+  });
+});
+
+describe("edit_image input schema", () => {
+  const schema = z.object(editImageInput);
+
+  test("accepts up to four reference images", () => {
+    assert.equal(schema.safeParse({ prompt: "p", images: ["a", "b", "c", "d"] }).success, true);
+  });
+
+  test("rejects a fifth image instead of dropping it", () => {
+    const result = schema.safeParse({ prompt: "p", images: ["a", "b", "c", "d", "e"] });
+    assert.equal(result.success, false);
+    assert.equal(result.error.issues[0].code, "too_big");
+  });
+
+  test("rejects an empty image list", () => {
+    const result = schema.safeParse({ prompt: "p", images: [] });
+    assert.equal(result.success, false);
+    assert.equal(result.error.issues[0].code, "too_small");
   });
 });
