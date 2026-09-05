@@ -2,3 +2,7 @@ node_modules/
 *.log
 .env
 .env.*
+
+# Config MCP local: dentro de este repo npx no puede instalar el propio
+# paquete, así que aquí se arranca el server.js del árbol de trabajo.
+.mcp.json
