@@ -149,8 +149,8 @@ export async function generateImage({ prompt, size, n, seed, guidance, outputNam
     prompt,
     ...(size ? { size } : {}),
     ...(n ? { n } : {}),
-    ...(seed !== undefined ? { seed } : {}),
-    ...(guidance !== undefined ? { guidance } : {}),
+    ...(seed === undefined ? {} : { seed }),
+    ...(guidance === undefined ? {} : { guidance }),
   };
 
   const json = await nanRequest("/images/generations", {
@@ -368,7 +368,7 @@ server.registerTool("embed_text", {
 
 server.registerTool("rerank_documents", {
   title: "Rerank Documents",
-  description: "Order documents by how well they answer a query, with Qwen3-Reranker-8B (NaN API). This is the second half of a RAG pipeline: embed_text retrieves candidates, this one ranks them. Returns one line per document with its relevance score and its position in the input list, in the order the reranker gives them back.",
+  description: "Order documents by how well they answer a query, with Qwen3-Reranker-8B (NaN API). This is the second half of a RAG pipeline: embed_text builds the vectors a search runs over, and this one ranks what that search returns. Returns one line per document with its relevance score and its position in the input list, in the order the reranker gives them back.",
   inputSchema: {
     query: z.string().describe("Query against which each document's relevance is measured"),
     documents: z.array(z.string()).describe("Candidate texts to re-rank, typically the top hits of a vector search"),
