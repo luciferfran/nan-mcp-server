@@ -35,21 +35,21 @@ El paquete se distribuye por [npm](https://www.npmjs.com/package/nan-mcp-server)
 
 ```bash
 export NAN_API_KEY="sk-tu-key-aqui"
-npx -y nan-mcp-server@1.0.8
+npx -y nan-mcp-server@1.0.9
 ```
 
 Con otro gestor de paquetes, si ya lo usas:
 
 ```bash
-pnpm dlx nan-mcp-server@1.0.8    # pnpm
-yarn dlx nan-mcp-server@1.0.8    # yarn
-bunx nan-mcp-server@1.0.8        # bun
+pnpm dlx nan-mcp-server@1.0.9    # pnpm
+yarn dlx nan-mcp-server@1.0.9    # yarn
+bunx nan-mcp-server@1.0.9        # bun
 ```
 
 O instálalo globalmente:
 
 ```bash
-npm install -g nan-mcp-server@1.0.8   # o: pnpm add -g / bun add -g
+npm install -g nan-mcp-server@1.0.9   # o: pnpm add -g / bun add -g
 nan-mcp-server
 ```
 
@@ -73,7 +73,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
   "mcp": {
     "nan-media": {
       "type": "local",
-      "command": ["npx", "-y", "nan-mcp-server@1.0.8"],
+      "command": ["npx", "-y", "nan-mcp-server@1.0.9"],
       "environment": {
         "NAN_API_KEY": "{env:NAN_API_KEY}"
       }
@@ -91,7 +91,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
 
 ```bash
 claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
-  npx -y nan-mcp-server@1.0.8
+  npx -y nan-mcp-server@1.0.9
 ```
 
 **O en `.mcp.json`:**
@@ -102,7 +102,7 @@ claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
     "nan-media": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.0.8"],
+      "args": ["-y", "nan-mcp-server@1.0.9"],
       "env": {
         "NAN_API_KEY": "${NAN_API_KEY}"
       }
@@ -119,16 +119,13 @@ claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
 En `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.nan]
-url = "https://api.nan.builders/mcp"
-bearer_token_env_var = "NAN_API_KEY"
-
 [mcp_servers.nan-media]
 command = "npx"
-args = ["-y", "nan-mcp-server@1.0.8"]
+args = ["-y", "nan-mcp-server@1.0.9"]
+env_vars = ["NAN_API_KEY"]
 ```
 
-> **Seguridad**: codex lee `NAN_API_KEY` de una variable de entorno — el servidor remoto vía `bearer_token_env_var` y el servidor local la hereda del shell. Así `config.toml` se puede subir a GitHub sin exponer secretos.
+> **`env_vars` no es opcional**: codex no propaga su propio entorno a los servidores MCP, así que sin esa línea el proceso arranca sin `NAN_API_KEY` y muere durante el handshake (`connection closed: initialize response`). `env_vars` nombra las variables que debe heredar; `env` solo admite valores literales, que no conviene escribir en un archivo versionado.
 
 </details>
 
@@ -146,14 +143,9 @@ Crea `~/.config/mcp/mcp.json` (config compartido MCP estándar):
 ```json
 {
   "mcpServers": {
-    "nan": {
-      "url": "https://api.nan.builders/mcp",
-      "auth": "bearer",
-      "bearerTokenEnv": "NAN_API_KEY"
-    },
     "nan-media": {
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.0.8"],
+      "args": ["-y", "nan-mcp-server@1.0.9"],
       "env": {
         "NAN_API_KEY": "$env:NAN_API_KEY"
       }
@@ -162,7 +154,7 @@ Crea `~/.config/mcp/mcp.json` (config compartido MCP estándar):
 }
 ```
 
-> El servidor `nan` (remoto) usa `auth: "bearer"` con `bearerTokenEnv`; `nan-media` (local) interpola la key con `$env:NAN_API_KEY`. Ningún secreto queda en el archivo.
+> La key se interpola con `$env:NAN_API_KEY`, así que ningún secreto queda en el archivo.
 
 Para usar los modelos de NaN en Pi, define el proveedor en `~/.pi/agent/models.json`:
 
@@ -192,7 +184,7 @@ Luego usa `--provider nan --model <id>` (p.ej. `pi --provider nan --model deepse
 En la configuración de MCP del cliente, añade un servidor stdio:
 
 ```
-Comando: npx -y nan-mcp-server@1.0.8
+Comando: npx -y nan-mcp-server@1.0.9
 Variables: NAN_API_KEY=tu-clave-de-nan-builders (no la incluyas en el config versionado)
 ```
 
@@ -215,7 +207,6 @@ Una vez conectado, pide al agente:
 | Tamaño máximo archivo (STT / edit_image) | 25 MB por archivo |
 | Audios para transcripción | máx. ~2 min por archivo (timeout 524 si supera) |
 | Imágenes de referencia (edit_image) | hasta 4 |
-| Web search (vía MCP remoto) | 20 req/min, 500 req/día |
 
 ## Variables de entorno
 
