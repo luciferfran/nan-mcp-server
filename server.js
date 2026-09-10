@@ -225,7 +225,7 @@ export async function listModels() {
   return { content: [{ type: "text", text: lines.join("\n") || "No models found" }] };
 }
 
-export async function embed({ input, encoding_format }) {
+export async function embedText({ input, encoding_format }) {
   const body = {
     model: "qwen3-embedding",
     input,
@@ -251,7 +251,7 @@ export async function embed({ input, encoding_format }) {
   };
 }
 
-export async function rerank({ query, documents, top_n }) {
+export async function rerankDocuments({ query, documents, top_n }) {
   const body = {
     model: "rerank",
     query,
@@ -312,26 +312,26 @@ const server = new McpServer({
 
 server.registerTool("generate_image", {
   title: "Generate Image",
-  description: "Generate an image with flux-2-klein (NaN API). Returns the saved image file path and its URL.",
+  description: "Generate an image from a text prompt with flux-2-klein (NaN API). Use edit_image instead when you already have reference images to transform. Saves each image under NAN_OUTPUT_DIR (default ~/nan-mcp-output) and never overwrites: a taken name gets -2, -3, and so on. Returns the saved path and the temporary source URL. Counts against the account image quota (100/month).",
   inputSchema: {
     prompt: z.string().describe("Textual description of the image to generate"),
     size: z.string().optional().describe('Image size "WxH" divisible by 16, e.g. 1024x1024, 1536x1024, 1024x1536. Default 1024x1024'),
-    n: z.number().int().min(1).max(4).optional().describe("Number of images to generate (1-4). Default 1"),
+    n: z.number().int().min(1).max(4).optional().describe("Number of images to generate (1-4). Default 1. Each one counts against the monthly quota"),
     seed: z.number().optional().describe("Base seed for reproducibility"),
     guidance: z.number().optional().describe("FLUX guidance scale"),
-    outputName: z.string().optional().describe("Optional base name for the output file(s)"),
+    outputName: z.string().optional().describe("Optional base name for the output file(s). Sanitised to a safe filename; an existing name is never overwritten"),
   },
 }, generateImage);
 
 server.registerTool("list_voices", {
   title: "List Voices",
-  description: "List all available kokoro TTS voices grouped by language.",
+  description: "List the kokoro voice ids that text_to_speech accepts, grouped by language. Answered from the catalog bundled with the server, so it costs no API call and takes no arguments.",
   inputSchema: {},
 }, listVoices);
 
 server.registerTool("text_to_speech", {
   title: "Text To Speech",
-  description: "Synthesize audio from text with kokoro (NaN API TTS). Returns the saved audio file path. Use the list_voices tool to see all available voices per language.",
+  description: "Synthesize speech from text with kokoro (NaN API TTS); speech_to_text does the opposite. Call list_voices first to pick a voice id. Writes the audio under NAN_OUTPUT_DIR (default ~/nan-mcp-output) without overwriting anything, and returns the saved path and its size in bytes.",
   inputSchema: {
     text: z.string().describe("Text to synthesize"),
     voice: z.string().optional().describe('Voice to use, e.g. "af_heart" (American English female), "ef_dora" (Spanish female), "em_alex" (Spanish male), "em_santa" (Spanish male). Use list_voices for the full catalog'),
@@ -343,7 +343,7 @@ server.registerTool("text_to_speech", {
 
 server.registerTool("speech_to_text", {
   title: "Speech To Text",
-  description: "Transcribe an audio file with whisper (NaN API STT). Returns the transcript.",
+  description: "Transcribe a local audio file with whisper (NaN API STT); text_to_speech does the opposite. The file must exist on this machine and stay under 25MB and about 2 minutes, or the request times out. Returns the plain transcript, or the full JSON with per-segment timings when verbose is set. Writes nothing to disk.",
   inputSchema: {
     file: z.string().describe("Absolute path to the audio file to transcribe"),
     language: z.string().optional().describe('ISO-639-1 language code, e.g. "es", "en". Auto-detected if omitted'),
@@ -353,28 +353,28 @@ server.registerTool("speech_to_text", {
 
 server.registerTool("list_models", {
   title: "List Models",
-  description: "List all available NaN API models for your key.",
+  description: "List the NaN API model ids the configured key can reach, one per line with its owner. Useful to confirm access or spot a retired model before calling another tool.",
   inputSchema: {},
 }, listModels);
 
-server.registerTool("embed", {
-  title: "Embed",
-  description: "Generate vector embeddings with qwen3-embedding (NaN API, 4096 dimensions). Useful for RAG and semantic search.",
+server.registerTool("embed_text", {
+  title: "Embed Text",
+  description: "Turn text into 4096-dimension vectors with qwen3-embedding (NaN API) for RAG or semantic search; rerank_documents then orders whatever a search over those vectors brings back. Returns only a summary — item count, dimensions and input tokens — because the vectors are far too large to put in the conversation, so use this to populate a store rather than to read values.",
   inputSchema: {
-    input: z.string().or(z.array(z.string())).describe("Single text or array of strings to embed"),
+    input: z.string().or(z.array(z.string())).describe("Single text or array of strings to embed. Passing the whole batch in one call is cheaper than one call per string"),
     encoding_format: z.enum(["float", "base64"]).optional().describe("Encoding format. Default float"),
   },
-}, embed);
+}, embedText);
 
-server.registerTool("rerank", {
-  title: "Rerank",
-  description: "Re-rank a list of documents by relevance to a query (NaN API, Qwen3-Reranker-8B). Complements embed for RAG pipelines.",
+server.registerTool("rerank_documents", {
+  title: "Rerank Documents",
+  description: "Order documents by how well they answer a query, with Qwen3-Reranker-8B (NaN API). This is the second half of a RAG pipeline: embed_text retrieves candidates, this one ranks them. Returns one line per document with its relevance score and its position in the input list, in the order the reranker gives them back.",
   inputSchema: {
     query: z.string().describe("Query against which each document's relevance is measured"),
-    documents: z.array(z.string()).describe("Array of strings to re-rank"),
+    documents: z.array(z.string()).describe("Candidate texts to re-rank, typically the top hits of a vector search"),
     top_n: z.number().int().min(1).optional().describe("Limit response to the N most relevant documents"),
   },
-}, rerank);
+}, rerankDocuments);
 
 // Exported so a test can check the contract the client actually sees. The
 // other tools keep their schema inline.
@@ -390,7 +390,7 @@ export const editImageInput = {
 
 server.registerTool("edit_image", {
   title: "Edit Image",
-  description: "Edit an image with flux-2-klein image-to-image (NaN API). Takes one or more reference image files and applies a transformation. Returns the saved output image path.",
+  description: "Transform existing images with flux-2-klein image-to-image (NaN API). Use generate_image instead when starting from text alone. Takes 1 to 4 local reference files (PNG, JPEG or WebP, each under 25MB), saves the result under NAN_OUTPUT_DIR (default ~/nan-mcp-output) without overwriting anything, and returns the saved path and the temporary source URL. Counts against the account image quota (100/month).",
   inputSchema: editImageInput,
 }, editImage);
 

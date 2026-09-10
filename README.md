@@ -20,8 +20,8 @@ Al ser un estándar abierto, funciona con **opencode**, **Claude Code**, **Codex
 | `text_to_speech` | Sintetizar audio desde texto | `kokoro` |
 | `list_voices` | Listar voces kokoro por idioma | — |
 | `speech_to_text` | Transcribir audio a texto | `whisper` |
-| `embed` | Embeddings vectoriales (4096 dims) | `qwen3-embedding` |
-| `rerank` | Reordenar documentos por relevancia (RAG) | `rerank` |
+| `embed_text` | Embeddings vectoriales (4096 dims) | `qwen3-embedding` |
+| `rerank_documents` | Reordenar documentos por relevancia (RAG) | `rerank` |
 | `list_models` | Listar modelos disponibles con tu key | — |
 
 ## Requisitos
@@ -35,21 +35,21 @@ El paquete se distribuye por [npm](https://www.npmjs.com/package/nan-mcp-server)
 
 ```bash
 export NAN_API_KEY="sk-tu-key-aqui"
-npx -y nan-mcp-server@1.0.9
+npx -y nan-mcp-server@1.1.0
 ```
 
 Con otro gestor de paquetes, si ya lo usas:
 
 ```bash
-pnpm dlx nan-mcp-server@1.0.9    # pnpm
-yarn dlx nan-mcp-server@1.0.9    # yarn
-bunx nan-mcp-server@1.0.9        # bun
+pnpm dlx nan-mcp-server@1.1.0    # pnpm
+yarn dlx nan-mcp-server@1.1.0    # yarn
+bunx nan-mcp-server@1.1.0        # bun
 ```
 
 O instálalo globalmente:
 
 ```bash
-npm install -g nan-mcp-server@1.0.9   # o: pnpm add -g / bun add -g
+npm install -g nan-mcp-server@1.1.0   # o: pnpm add -g / bun add -g
 nan-mcp-server
 ```
 
@@ -73,7 +73,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
   "mcp": {
     "nan-media": {
       "type": "local",
-      "command": ["npx", "-y", "nan-mcp-server@1.0.9"],
+      "command": ["npx", "-y", "nan-mcp-server@1.1.0"],
       "environment": {
         "NAN_API_KEY": "{env:NAN_API_KEY}"
       }
@@ -91,7 +91,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
 
 ```bash
 claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
-  npx -y nan-mcp-server@1.0.9
+  npx -y nan-mcp-server@1.1.0
 ```
 
 **O en `.mcp.json`:**
@@ -102,7 +102,7 @@ claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
     "nan-media": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.0.9"],
+      "args": ["-y", "nan-mcp-server@1.1.0"],
       "env": {
         "NAN_API_KEY": "${NAN_API_KEY}"
       }
@@ -121,7 +121,7 @@ En `~/.codex/config.toml`:
 ```toml
 [mcp_servers.nan-media]
 command = "npx"
-args = ["-y", "nan-mcp-server@1.0.9"]
+args = ["-y", "nan-mcp-server@1.1.0"]
 env_vars = ["NAN_API_KEY"]
 ```
 
@@ -145,7 +145,7 @@ Crea `~/.config/mcp/mcp.json` (config compartido MCP estándar):
   "mcpServers": {
     "nan-media": {
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.0.9"],
+      "args": ["-y", "nan-mcp-server@1.1.0"],
       "env": {
         "NAN_API_KEY": "$env:NAN_API_KEY"
       }
@@ -184,7 +184,7 @@ Luego usa `--provider nan --model <id>` (p.ej. `pi --provider nan --model deepse
 En la configuración de MCP del cliente, añade un servidor stdio:
 
 ```
-Comando: npx -y nan-mcp-server@1.0.9
+Comando: npx -y nan-mcp-server@1.1.0
 Variables: NAN_API_KEY=tu-clave-de-nan-builders (no la incluyas en el config versionado)
 ```
 

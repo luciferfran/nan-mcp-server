@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   API_KEY,
@@ -21,8 +23,8 @@ import {
   speechToText,
   listVoices,
   listModels,
-  embed,
-  rerank,
+  embedText,
+  rerankDocuments,
 } from "../server.js";
 
 const ORIGINAL_FETCH = globalThis.fetch;
@@ -251,7 +253,7 @@ describe("handlers with mocked fetch", () => {
       });
     });
 
-    const result = await embed({ input: "hello" });
+    const result = await embedText({ input: "hello" });
     assert.match(result.content[0].text, /4096 dimensions/);
     assert.ok(result.content[0].text.length < 500, "should not dump 4096 floats");
   });
@@ -266,7 +268,7 @@ describe("handlers with mocked fetch", () => {
       });
     });
 
-    const result = await rerank({
+    const result = await rerankDocuments({
       query: "capital of France",
       documents: ["Berlin", "London", "Paris"],
     });
@@ -546,5 +548,66 @@ describe("edit_image input schema", () => {
     const result = schema.safeParse({ prompt: "p", images: [] });
     assert.equal(result.success, false);
     assert.equal(result.error.issues[0].code, "too_small");
+  });
+});
+
+// The tool names are the public surface: a client's allowlists and a model's
+// prompts refer to them. Renaming one is a breaking change, so it should not be
+// possible to do it by accident. This drives the real binary over stdio.
+function listRegisteredTools() {
+  const entrada = [
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } } },
+    { jsonrpc: "2.0", id: 2, method: "tools/list" },
+  ].map((m) => JSON.stringify(m)).join("\n") + "\n";
+
+  return new Promise((resolve, reject) => {
+    const salida = fs.mkdtempSync(path.join(os.tmpdir(), "nan-mcp-catalog-"));
+    const hijo = spawn(process.execPath, [fileURLToPath(new URL("../server.js", import.meta.url))], {
+      env: { ...process.env, NAN_API_KEY: "test-key", NAN_OUTPUT_DIR: salida },
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+
+    let acumulado = "";
+    const limpiar = () => {
+      clearTimeout(temporizador);
+      hijo.kill();
+      fs.rmSync(salida, { recursive: true, force: true });
+    };
+    const temporizador = setTimeout(() => {
+      limpiar();
+      reject(new Error("the server did not answer tools/list in time"));
+    }, 20000);
+
+    hijo.on("error", (err) => { limpiar(); reject(err); });
+    hijo.stdout.on("data", (trozo) => {
+      acumulado += trozo;
+      for (const linea of acumulado.split("\n")) {
+        if (!linea.trim()) continue;
+        let mensaje;
+        try { mensaje = JSON.parse(linea); } catch { continue; }
+        if (mensaje.id === 2) {
+          limpiar();
+          resolve(mensaje.result.tools.map((t) => t.name));
+        }
+      }
+    });
+
+    hijo.stdin.write(entrada);
+  });
+}
+
+describe("tool catalog", () => {
+  test("publishes the eight tool names clients depend on", async () => {
+    const nombres = await listRegisteredTools();
+    assert.deepEqual(nombres.slice().sort(), [
+      "edit_image",
+      "embed_text",
+      "generate_image",
+      "list_models",
+      "list_voices",
+      "rerank_documents",
+      "speech_to_text",
+      "text_to_speech",
+    ]);
   });
 });
