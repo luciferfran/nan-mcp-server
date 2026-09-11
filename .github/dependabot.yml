@@ -1,0 +1,34 @@
+# Version updates. Security alerts are a repo setting, not configured here.
+#
+# Two runtime dependencies and three actions: one grouped PR a week at most.
+# Majors stay out of the groups so an MCP SDK 2.x or a zod 5 gets its own PR
+# and a proper look. Nothing merges on its own; CI runs on every PR as usual.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Europe/Madrid
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(deps)"
+    labels: [dependencies]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Europe/Madrid
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+    labels: [dependencies]
