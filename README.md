@@ -35,21 +35,21 @@ El paquete se distribuye por [npm](https://www.npmjs.com/package/nan-mcp-server)
 
 ```bash
 export NAN_API_KEY="sk-tu-key-aqui"
-npx -y nan-mcp-server@1.1.4
+npx -y nan-mcp-server@1.2.0
 ```
 
 Con otro gestor de paquetes, si ya lo usas:
 
 ```bash
-pnpm dlx nan-mcp-server@1.1.4    # pnpm
-yarn dlx nan-mcp-server@1.1.4    # yarn
-bunx nan-mcp-server@1.1.4        # bun
+pnpm dlx nan-mcp-server@1.2.0    # pnpm
+yarn dlx nan-mcp-server@1.2.0    # yarn
+bunx nan-mcp-server@1.2.0        # bun
 ```
 
 O instálalo globalmente:
 
 ```bash
-npm install -g nan-mcp-server@1.1.4   # o: pnpm add -g / bun add -g
+npm install -g nan-mcp-server@1.2.0   # o: pnpm add -g / bun add -g
 nan-mcp-server
 ```
 
@@ -57,7 +57,7 @@ nan-mcp-server
 
 ## Configuración
 
-El servidor se ejecuta vía **stdio** (proceso local). Solo necesita una variable de entorno: `NAN_API_KEY`.
+El servidor se ejecuta vía **stdio** (proceso local). Solo necesita una variable de entorno: `NAN_API_KEY`. Sin ella arranca igualmente y publica su catálogo —para que cualquier inspector pueda leerlo—, pero toda herramienta que llame a la API falla indicando que falta.
 
 Las imágenes y audios generados se guardan en `~/nan-mcp-output/` (configurable con `NAN_OUTPUT_DIR`).
 
@@ -73,7 +73,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
   "mcp": {
     "nan-media": {
       "type": "local",
-      "command": ["npx", "-y", "nan-mcp-server@1.1.4"],
+      "command": ["npx", "-y", "nan-mcp-server@1.2.0"],
       "environment": {
         "NAN_API_KEY": "{env:NAN_API_KEY}"
       }
@@ -91,7 +91,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
 
 ```bash
 claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
-  npx -y nan-mcp-server@1.1.4
+  npx -y nan-mcp-server@1.2.0
 ```
 
 **O en `.mcp.json`:**
@@ -102,7 +102,7 @@ claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
     "nan-media": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.1.4"],
+      "args": ["-y", "nan-mcp-server@1.2.0"],
       "env": {
         "NAN_API_KEY": "${NAN_API_KEY}"
       }
@@ -121,11 +121,11 @@ En `~/.codex/config.toml`:
 ```toml
 [mcp_servers.nan-media]
 command = "npx"
-args = ["-y", "nan-mcp-server@1.1.4"]
+args = ["-y", "nan-mcp-server@1.2.0"]
 env_vars = ["NAN_API_KEY"]
 ```
 
-> **`env_vars` no es opcional**: codex no propaga su propio entorno a los servidores MCP, así que sin esa línea el proceso arranca sin `NAN_API_KEY` y muere durante el handshake (`connection closed: initialize response`). `env_vars` nombra las variables que debe heredar; `env` solo admite valores literales, que no conviene escribir en un archivo versionado.
+> **`env_vars` no es opcional**: codex no propaga su propio entorno a los servidores MCP, así que sin esa línea el servidor arranca sin `NAN_API_KEY` y cada llamada falla con «NAN_API_KEY environment variable is required». `env_vars` nombra las variables que debe heredar; `env` solo admite valores literales, que no conviene escribir en un archivo versionado.
 
 </details>
 
@@ -145,7 +145,7 @@ Crea `~/.config/mcp/mcp.json` (config compartido MCP estándar):
   "mcpServers": {
     "nan-media": {
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.1.4"],
+      "args": ["-y", "nan-mcp-server@1.2.0"],
       "env": {
         "NAN_API_KEY": "$env:NAN_API_KEY"
       }
@@ -184,7 +184,7 @@ Luego usa `--provider nan --model <id>` (p.ej. `pi --provider nan --model deepse
 En la configuración de MCP del cliente, añade un servidor stdio:
 
 ```
-Comando: npx -y nan-mcp-server@1.1.4
+Comando: npx -y nan-mcp-server@1.2.0
 Variables: NAN_API_KEY=tu-clave-de-nan-builders (no la incluyas en el config versionado)
 ```
 
@@ -212,7 +212,7 @@ Una vez conectado, pide al agente:
 
 | Variable | Obligatoria | Descripción |
 |---|---|---|
-| `NAN_API_KEY` | Sí | API key de NaN |
+| `NAN_API_KEY` | Sí, para llamar a la API | API key de NaN. Sin ella el servidor arranca y lista sus herramientas, pero solo `list_voices` responde |
 | `NAN_BASE_URL` | No | Base URL de la API (default `https://api.nan.builders/v1`) |
 | `NAN_OUTPUT_DIR` | No | Directorio de salida (default `~/nan-mcp-output`) |
 | `NAN_TIMEOUT_MS` | No | Timeout por petición en ms (default `180000`, 3 min) |

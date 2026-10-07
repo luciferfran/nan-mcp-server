@@ -76,6 +76,14 @@ async function downloadBuffer(url, timeoutMs = TIMEOUT_MS) {
 
 // The body is consumed here so the timeout covers the whole exchange, not just headers.
 export async function nanRequest(endpoint, { parse = "json", ...options } = {}) {
+  // Checked here rather than at startup: without this the request would go out
+  // with "Bearer undefined" and come back as an opaque 401.
+  if (!API_KEY) {
+    throw new Error(
+      "NAN_API_KEY environment variable is required to call the NaN API. Set it in the environment of the MCP server process."
+    );
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -397,9 +405,14 @@ server.registerTool("edit_image", {
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isMain) {
+  // Inspectors — Glama, the MCP Inspector, a registry — start the server with
+  // no key just to read the catalog. Exiting here killed them during the
+  // handshake. The key is only needed once a tool reaches the API, so say so
+  // and carry on; list_voices needs no key at all.
   if (!API_KEY) {
-    console.error("Error: NAN_API_KEY environment variable is required");
-    process.exit(1);
+    console.error(
+      "Warning: NAN_API_KEY is not set. The catalog is available, but any tool that calls the NaN API will fail until you set it."
+    );
   }
   fs.mkdirSync(getOutputDir(), { recursive: true });
   const transport = new StdioServerTransport();

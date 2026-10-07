@@ -554,20 +554,30 @@ describe("edit_image input schema", () => {
 // The tool names are the public surface: a client's allowlists and a model's
 // prompts refer to them. Renaming one is a breaking change, so it should not be
 // possible to do it by accident. This drives the real binary over stdio.
-function listRegisteredTools() {
-  const entrada = [
+// Drives the real binary over stdio. `peticiones` are sent after initialize;
+// resolves once the last id has answered, with stderr alongside.
+function hablarConElServidor({ env = {}, peticiones = [], esperaId }) {
+  const mensajes = [
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } } },
-    { jsonrpc: "2.0", id: 2, method: "tools/list" },
-  ].map((m) => JSON.stringify(m)).join("\n") + "\n";
+    ...peticiones,
+  ];
+  const entrada = mensajes.map((m) => JSON.stringify(m)).join("\n") + "\n";
+  const ultimo = esperaId ?? mensajes[mensajes.length - 1].id;
 
   return new Promise((resolve, reject) => {
     const salida = fs.mkdtempSync(path.join(os.tmpdir(), "nan-mcp-catalog-"));
+    const entorno = { ...process.env, NAN_API_KEY: "test-key", NAN_OUTPUT_DIR: salida, ...env };
+    for (const [clave, valor] of Object.entries(env)) {
+      if (valor === undefined) delete entorno[clave];
+    }
+
     const hijo = spawn(process.execPath, [fileURLToPath(new URL("../server.js", import.meta.url))], {
-      env: { ...process.env, NAN_API_KEY: "test-key", NAN_OUTPUT_DIR: salida },
-      stdio: ["pipe", "pipe", "ignore"],
+      env: entorno,
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
     let acumulado = "";
+    let errores = "";
     const limpiar = () => {
       clearTimeout(temporizador);
       hijo.kill();
@@ -575,25 +585,40 @@ function listRegisteredTools() {
     };
     const temporizador = setTimeout(() => {
       limpiar();
-      reject(new Error("the server did not answer tools/list in time"));
+      reject(new Error(`the server did not answer id ${ultimo} in time. stderr: ${errores}`));
     }, 20000);
 
     hijo.on("error", (err) => { limpiar(); reject(err); });
+    hijo.on("exit", (codigo) => {
+      if (codigo !== null && codigo !== 0) {
+        limpiar();
+        reject(new Error(`the server exited with code ${codigo}. stderr: ${errores}`));
+      }
+    });
+    hijo.stderr.on("data", (trozo) => { errores += trozo; });
     hijo.stdout.on("data", (trozo) => {
       acumulado += trozo;
       for (const linea of acumulado.split("\n")) {
         if (!linea.trim()) continue;
         let mensaje;
         try { mensaje = JSON.parse(linea); } catch { continue; }
-        if (mensaje.id === 2) {
+        if (mensaje.id === ultimo) {
           limpiar();
-          resolve(mensaje.result.tools.map((t) => t.name));
+          resolve({ respuesta: mensaje, stderr: errores });
         }
       }
     });
 
     hijo.stdin.write(entrada);
   });
+}
+
+async function listRegisteredTools(env) {
+  const { respuesta } = await hablarConElServidor({
+    env,
+    peticiones: [{ jsonrpc: "2.0", id: 2, method: "tools/list" }],
+  });
+  return respuesta.result.tools.map((t) => t.name);
 }
 
 describe("tool catalog", () => {
@@ -609,5 +634,42 @@ describe("tool catalog", () => {
       "speech_to_text",
       "text_to_speech",
     ]);
+  });
+});
+
+describe("starting without a key", () => {
+  const sinClave = { NAN_API_KEY: undefined };
+
+  test("still serves the catalog, so inspectors can read it", async () => {
+    // Exiting at startup made every inspector see a server that dies during
+    // the handshake, with nothing to show for it.
+    const nombres = await listRegisteredTools(sinClave);
+    assert.equal(nombres.length, 8);
+  });
+
+  test("warns on stderr without killing the process", async () => {
+    const { stderr } = await hablarConElServidor({
+      env: sinClave,
+      peticiones: [{ jsonrpc: "2.0", id: 2, method: "tools/list" }],
+    });
+    assert.match(stderr, /NAN_API_KEY is not set/);
+  });
+
+  test("answers list_voices, which never touches the API", async () => {
+    const { respuesta } = await hablarConElServidor({
+      env: sinClave,
+      peticiones: [{ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_voices", arguments: {} } }],
+    });
+    assert.equal(respuesta.result.isError, undefined);
+    assert.match(respuesta.result.content[0].text, /Spanish: ef_dora/);
+  });
+
+  test("fails a tool that needs the API with a message that names the variable", async () => {
+    const { respuesta } = await hablarConElServidor({
+      env: sinClave,
+      peticiones: [{ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_models", arguments: {} } }],
+    });
+    assert.equal(respuesta.result.isError, true);
+    assert.match(respuesta.result.content[0].text, /NAN_API_KEY environment variable is required/);
   });
 });
