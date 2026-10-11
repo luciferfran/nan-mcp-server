@@ -9,6 +9,9 @@ import { fileURLToPath } from "node:url";
 
 export const API_KEY = process.env.NAN_API_KEY;
 export const BASE_URL = process.env.NAN_BASE_URL || "https://api.nan.builders/v1";
+// The dashboard backend. Undocumented; it accepts this same sk- key as a
+// Bearer token on a small read-only surface (its 401 body lists the routes).
+export const CLOUD_URL = process.env.NAN_CLOUD_URL || "https://cloud-api.nan.builders";
 export const TIMEOUT_MS = Number(process.env.NAN_TIMEOUT_MS) || 180000;
 
 export function getOutputDir() {
@@ -75,7 +78,8 @@ async function downloadBuffer(url, timeoutMs = TIMEOUT_MS) {
 }
 
 // The body is consumed here so the timeout covers the whole exchange, not just headers.
-export async function nanRequest(endpoint, { parse = "json", ...options } = {}) {
+// `base` defaults to the inference API; pass CLOUD_URL for the dashboard backend.
+export async function nanRequest(endpoint, { parse = "json", base = BASE_URL, ...options } = {}) {
   // Checked here rather than at startup: without this the request would go out
   // with "Bearer undefined" and come back as an opaque 401.
   if (!API_KEY) {
@@ -88,7 +92,7 @@ export async function nanRequest(endpoint, { parse = "json", ...options } = {}) 
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const res = await fetch(`${BASE_URL}${endpoint}`, {
+    const res = await fetch(`${base}${endpoint}`, {
       ...options,
       signal: options.signal || controller.signal,
       headers: {
@@ -233,6 +237,38 @@ export async function listModels() {
   return { content: [{ type: "text", text: lines.join("\n") || "No models found" }] };
 }
 
+// Compact token counts for the quota lines: 427582 -> 427.6K, 3e9 -> 3B.
+export function fmtTokens(n) {
+  const v = Number(n) || 0;
+  const trim = (s) => s.replace(/\.0$/, "");
+  if (v >= 1e9) return `${trim((v / 1e9).toFixed(1))}B`;
+  if (v >= 1e6) return `${trim((v / 1e6).toFixed(1))}M`;
+  if (v >= 1e3) return `${Math.round(v / 1e3)}K`;
+  return String(Math.round(v));
+}
+
+export async function getQuota() {
+  const json = await nanRequest("/api/usage/quota", { base: CLOUD_URL });
+  const models = (json.models || []).slice().sort(
+    (a, b) => (b.tokensUsed || 0) / (b.cap || 1) - (a.tokensUsed || 0) / (a.cap || 1)
+  );
+  const lines = models.map((m) => {
+    const pct = m.cap ? trim1(((m.tokensUsed || 0) / m.cap) * 100) : "0";
+    let line = `${m.model}: ${fmtTokens(m.tokensUsed)} / ${fmtTokens(m.cap)} used (${pct}%), ${fmtTokens(m.remaining)} left`;
+    if (m.windowHours) line += ` — rolling ${m.windowHours}h window of ${fmtTokens(m.fullWindowTokens)}`;
+    if (m.periodEnd) line += ` — resets ${String(m.periodEnd).slice(0, 10)}`;
+    return line;
+  });
+  const text = lines.length
+    ? [`Quota period starting ${json.periodStart}:`, ...lines].join("\n")
+    : "No quota entries returned";
+  return { content: [{ type: "text", text }] };
+}
+
+function trim1(s) {
+  return String(Number(s).toFixed(1)).replace(/\.0$/, "");
+}
+
 export async function embedText({ input, encoding_format }) {
   const body = {
     model: "qwen3-embedding",
@@ -364,6 +400,12 @@ server.registerTool("list_models", {
   description: "List the NaN API model ids the configured key can reach, one per line with its owner. Useful to confirm access or spot a retired model before calling another tool.",
   inputSchema: {},
 }, listModels);
+
+server.registerTool("get_quota", {
+  title: "Get Quota",
+  description: "Report the account's token quota per model from the NaN dashboard backend (GET /api/usage/quota): used, cap, remaining and reset date, worst-utilised model first; some models carry a rolling window instead of a monthly cap. Read-only and free — it does not consume quota. Note this is an undocumented route that accepts the same sk- key; it may change without notice.",
+  inputSchema: {},
+}, getQuota);
 
 server.registerTool("embed_text", {
   title: "Embed Text",

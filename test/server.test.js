@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   API_KEY,
   BASE_URL,
+  CLOUD_URL,
   OUTPUT_DIR,
   TIMEOUT_MS,
   VOICES,
@@ -25,6 +26,8 @@ import {
   listModels,
   embedText,
   rerankDocuments,
+  getQuota,
+  fmtTokens,
 } from "../server.js";
 
 const ORIGINAL_FETCH = globalThis.fetch;
@@ -243,6 +246,78 @@ describe("handlers with mocked fetch", () => {
     const result = await listModels();
     assert.match(result.content[0].text, /deepseek-v4-flash \(openai\)/);
     assert.match(result.content[0].text, /flux-2-klein \(nan\)/);
+  });
+
+  test("getQuota reads the cloud backend, not the inference base", async () => {
+    let seenUrl = "";
+    let seenAuth = "";
+    mockFetch(async (url, opts) => {
+      seenUrl = url;
+      seenAuth = opts.headers.Authorization;
+      return jsonResponse({ periodStart: "2026-10-01", models: [] });
+    });
+
+    await getQuota();
+    assert.equal(seenUrl, `${CLOUD_URL}/api/usage/quota`);
+    assert.equal(seenAuth, `Bearer ${API_KEY}`);
+  });
+
+  test("getQuota formats and orders models worst-first", async () => {
+    mockFetch(async () =>
+      jsonResponse({
+        periodStart: "2026-10-01",
+        models: [
+          { model: "plenty", tokensUsed: 1000, cap: 1e9, remaining: 999999000, periodEnd: "2026-11-01T00:00:00Z" },
+          {
+            model: "nearly-full",
+            tokensUsed: 499572418,
+            cap: 500000000,
+            remaining: 427582,
+            periodEnd: "2026-11-01T00:00:00Z",
+          },
+          {
+            model: "windowed",
+            tokensUsed: 0,
+            cap: 3000000000,
+            remaining: 3000000000,
+            periodEnd: "2026-10-13T09:41:34Z",
+            fullWindowTokens: 400000000,
+            windowHours: 4,
+          },
+        ],
+      })
+    );
+
+    const result = await getQuota();
+    const text = result.content[0].text;
+    const lines = text.split("\n");
+    assert.equal(lines[0], "Quota period starting 2026-10-01:");
+    assert.equal(
+      lines[1],
+      "nearly-full: 499.6M / 500M used (99.9%), 428K left — resets 2026-11-01"
+    );
+    assert.equal(
+      lines[2],
+      "plenty: 1K / 1B used (0%), 1000M left — resets 2026-11-01"
+    );
+    assert.equal(
+      lines[3],
+      "windowed: 0 / 3B used (0%), 3B left — rolling 4h window of 400M — resets 2026-10-13"
+    );
+  });
+
+  test("getQuota survives an empty response", async () => {
+    mockFetch(async () => jsonResponse({ periodStart: "2026-10-01", models: [] }));
+    const result = await getQuota();
+    assert.equal(result.content[0].text, "No quota entries returned");
+  });
+
+  test("fmtTokens compacts counts", () => {
+    assert.equal(fmtTokens(42), "42");
+    assert.equal(fmtTokens(39034), "39K");
+    assert.equal(fmtTokens(1311433), "1.3M");
+    assert.equal(fmtTokens(3000000000), "3B");
+    assert.equal(fmtTokens(undefined), "0");
   });
 
   test("embed returns summary without dumping vectors", async () => {
@@ -622,12 +697,13 @@ async function listRegisteredTools(env) {
 }
 
 describe("tool catalog", () => {
-  test("publishes the eight tool names clients depend on", async () => {
+  test("publishes the nine tool names clients depend on", async () => {
     const nombres = await listRegisteredTools();
     assert.deepEqual(nombres.slice().sort(), [
       "edit_image",
       "embed_text",
       "generate_image",
+      "get_quota",
       "list_models",
       "list_voices",
       "rerank_documents",
@@ -644,7 +720,7 @@ describe("starting without a key", () => {
     // Exiting at startup made every inspector see a server that dies during
     // the handshake, with nothing to show for it.
     const nombres = await listRegisteredTools(sinClave);
-    assert.equal(nombres.length, 8);
+    assert.equal(nombres.length, 9);
   });
 
   test("warns on stderr without killing the process", async () => {
