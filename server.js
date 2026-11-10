@@ -155,9 +155,61 @@ async function saveGeneratedImages(json, base) {
   return results;
 }
 
-export async function generateImage({ prompt, size, n, seed, guidance, outputName }) {
+export const DEFAULT_IMAGE_MODEL = "flux-2-klein";
+export const IMAGE_MODELS = ["flux-2-klein", "qwen-image-2.1"];
+
+// Resolution ranges published by NaN. Both models require multiples of 16 and
+// an aspect ratio between 1:3 and 3:1.
+const IMAGE_SIZE_LIMITS = {
+  "flux-2-klein": { min: 256, max: 1536 },
+  "qwen-image-2.1": { min: 512, max: 1280 },
+};
+
+export function validateImageRequest({ model = DEFAULT_IMAGE_MODEL, size, seed, guidance } = {}) {
+  const limits = IMAGE_SIZE_LIMITS[model];
+  if (!limits) {
+    throw new Error(`Unknown image model: ${model}. Use one of: ${IMAGE_MODELS.join(", ")}`);
+  }
+
+  // qwen-image-2.1 is text-to-image only and has no guidance parameter. Fail
+  // loudly instead of dropping a value the caller thought was being applied.
+  if (guidance !== undefined && model !== DEFAULT_IMAGE_MODEL) {
+    throw new Error(`guidance is only supported by flux-2-klein; ${model} does not accept it`);
+  }
+
+  if (model === "qwen-image-2.1" && seed !== undefined) {
+    if (!Number.isInteger(seed) || seed < 0 || seed > 2147483647) {
+      throw new Error("seed for qwen-image-2.1 must be an integer from 0 to 2147483647");
+    }
+  }
+
+  if (size === undefined) return;
+
+  const match = /^(\d+)x(\d+)$/.exec(String(size).trim());
+  if (!match) {
+    throw new Error(`size must be "WxH", e.g. 1024x1024 (got "${size}")`);
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (width % 16 !== 0 || height % 16 !== 0) {
+    throw new Error(`size sides must be multiples of 16 (got ${size})`);
+  }
+  if (width < limits.min || width > limits.max || height < limits.min || height > limits.max) {
+    throw new Error(
+      `size for ${model} must be between ${limits.min} and ${limits.max} px per side (got ${size})`
+    );
+  }
+  if (Math.max(width / height, height / width) > 3) {
+    throw new Error(`size aspect ratio must be between 1:3 and 3:1 (got ${size})`);
+  }
+}
+
+export async function generateImage({ prompt, model = DEFAULT_IMAGE_MODEL, size, n, seed, guidance, outputName }) {
+  validateImageRequest({ model, size, seed, guidance });
+
   const body = {
-    model: "flux-2-klein",
+    model,
     prompt,
     ...(size ? { size } : {}),
     ...(n ? { n } : {}),
@@ -354,17 +406,20 @@ const server = new McpServer({
   version: VERSION,
 });
 
+export const generateImageInput = {
+  prompt: z.string().describe("Textual description of the image to generate"),
+  model: z.enum(IMAGE_MODELS).optional().describe('Image model: "flux-2-klein" (default; text to image) or "qwen-image-2.1" (text to image with cleaner text rendering; 512-1280 px, seed 0-2147483647, no guidance)'),
+  size: z.string().optional().describe('Image size "WxH" divisible by 16, e.g. 1024x1024, 1536x1024, 1024x1536. flux-2-klein: 256-1536 px per side; qwen-image-2.1: 512-1280 px per side. Aspect ratio 1:3-3:1. Default 1024x1024'),
+  n: z.number().int().min(1).max(4).optional().describe("Number of images to generate (1-4). Default 1. Each one counts against the monthly quota"),
+  seed: z.number().optional().describe("Base seed for reproducibility. qwen-image-2.1 requires an integer from 0 to 2147483647"),
+  guidance: z.number().optional().describe("FLUX guidance scale (flux-2-klein only)"),
+  outputName: z.string().optional().describe("Optional base name for the output file(s). Sanitised to a safe filename; an existing name is never overwritten"),
+};
+
 server.registerTool("generate_image", {
   title: "Generate Image",
-  description: "Generate an image from a text prompt with flux-2-klein (NaN API). Use edit_image instead when you already have reference images to transform. Saves each image under NAN_OUTPUT_DIR (default ~/nan-mcp-output) and never overwrites: a taken name gets -2, -3, and so on. Returns the saved path and the temporary source URL. Counts against the account image quota (100/month).",
-  inputSchema: {
-    prompt: z.string().describe("Textual description of the image to generate"),
-    size: z.string().optional().describe('Image size "WxH" divisible by 16, e.g. 1024x1024, 1536x1024, 1024x1536. Default 1024x1024'),
-    n: z.number().int().min(1).max(4).optional().describe("Number of images to generate (1-4). Default 1. Each one counts against the monthly quota"),
-    seed: z.number().optional().describe("Base seed for reproducibility"),
-    guidance: z.number().optional().describe("FLUX guidance scale"),
-    outputName: z.string().optional().describe("Optional base name for the output file(s). Sanitised to a safe filename; an existing name is never overwritten"),
-  },
+  description: "Generate an image from a text prompt with flux-2-klein (default) or qwen-image-2.1 (NaN API). qwen-image-2.1 is text-to-image only and renders text inside the image more cleanly; use edit_image when you already have reference images to transform. Saves each image under NAN_OUTPUT_DIR (default ~/nan-mcp-output) and never overwrites: a taken name gets -2, -3, and so on. Returns the saved path and the temporary source URL. Counts against the account image quota (100/month, shared by both image models).",
+  inputSchema: generateImageInput,
 }, generateImage);
 
 server.registerTool("list_voices", {
@@ -440,7 +495,7 @@ export const editImageInput = {
 
 server.registerTool("edit_image", {
   title: "Edit Image",
-  description: "Transform existing images with flux-2-klein image-to-image (NaN API). Use generate_image instead when starting from text alone. Takes 1 to 4 local reference files (PNG, JPEG or WebP, each under 25MB), saves the result under NAN_OUTPUT_DIR (default ~/nan-mcp-output) without overwriting anything, and returns the saved path and the temporary source URL. Counts against the account image quota (100/month).",
+  description: "Transform existing images with flux-2-klein image-to-image (NaN API). Use generate_image instead when starting from text alone. Takes 1 to 4 local reference files (PNG, JPEG or WebP, each under 25MB), saves the result under NAN_OUTPUT_DIR (default ~/nan-mcp-output) without overwriting anything, and returns the saved path and the temporary source URL. Counts against the shared account image quota (100/month, flux-2-klein and qwen-image-2.1).",
   inputSchema: editImageInput,
 }, editImage);
 

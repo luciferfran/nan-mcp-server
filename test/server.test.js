@@ -18,6 +18,7 @@ import {
   writeUnique,
   imageExtension,
   generateImage,
+  generateImageInput,
   editImage,
   editImageInput,
   textToSpeech,
@@ -181,6 +182,86 @@ describe("handlers with mocked fetch", () => {
     assert.match(text, new RegExp(outDir));
     assert.match(text, /\.png/);
     assert.ok(fs.existsSync(path.join(outDir, "a-test-image.png")));
+  });
+
+  test("generateImage sends the selected qwen-image-2.1 model", async () => {
+    let capturedBody;
+    mockFetch(async (url, opts) => {
+      assert.equal(url, `${BASE_URL}/images/generations`);
+      capturedBody = JSON.parse(opts.body);
+      return jsonResponse({ data: [{ b64_json: Buffer.from("qwen-image").toString("base64") }] });
+    });
+
+    await generateImage({
+      prompt: "un cartel con la palabra faro",
+      model: "qwen-image-2.1",
+      size: "1024x1024",
+      seed: 2147483647,
+    });
+
+    assert.equal(capturedBody.model, "qwen-image-2.1");
+    assert.equal(capturedBody.size, "1024x1024");
+    assert.equal(capturedBody.seed, 2147483647);
+    assert.equal("guidance" in capturedBody, false);
+  });
+
+  test("generateImage rejects guidance for qwen-image-2.1 before calling the API", async () => {
+    mockFetch(async () => assert.fail("the API should not be reached"));
+    await assert.rejects(
+      generateImage({ prompt: "cartel", model: "qwen-image-2.1", guidance: 3.5 }),
+      /guidance is only supported by flux-2-klein/
+    );
+  });
+
+  test("generateImage enforces the qwen-image-2.1 size range and grid", async () => {
+    mockFetch(async () => assert.fail("the API should not be reached"));
+
+    await assert.rejects(
+      generateImage({ prompt: "x", model: "qwen-image-2.1", size: "256x256" }),
+      /between 512 and 1280/
+    );
+    await assert.rejects(
+      generateImage({ prompt: "x", model: "qwen-image-2.1", size: "1000x1000" }),
+      /multiples of 16/
+    );
+    // 1280x512 is the widest ratio the qwen range allows (2.5:1); it must pass.
+    mockFetch(async () => jsonResponse({ data: [{ b64_json: Buffer.from("x").toString("base64") }] }));
+    await generateImage({ prompt: "x", model: "qwen-image-2.1", size: "1280x512" });
+  });
+
+  test("generateImage enforces the qwen-image-2.1 seed range", async () => {
+    mockFetch(async () => assert.fail("the API should not be reached"));
+
+    for (const seed of [-1, 1.5, 2147483648]) {
+      await assert.rejects(
+        generateImage({ prompt: "x", model: "qwen-image-2.1", seed }),
+        /integer from 0 to 2147483647/
+      );
+    }
+  });
+
+  test("generateImage keeps flux-2-klein sizes and guidance working", async () => {
+    let capturedBody;
+    mockFetch(async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return jsonResponse({ data: [{ b64_json: Buffer.from("flux").toString("base64") }] });
+    });
+
+    await generateImage({ prompt: "x", size: "256x256", seed: 42, guidance: 3.5 });
+
+    assert.equal(capturedBody.model, "flux-2-klein");
+    assert.equal(capturedBody.size, "256x256");
+    assert.equal(capturedBody.seed, 42);
+    assert.equal(capturedBody.guidance, 3.5);
+
+    await assert.rejects(
+      generateImage({ prompt: "x", size: "2048x2048" }),
+      /between 256 and 1536/
+    );
+    await assert.rejects(
+      generateImage({ prompt: "x", size: "1536x256" }),
+      /aspect ratio/
+    );
   });
 
   test("generateImage sanitizes path traversal in outputName", async () => {
@@ -603,6 +684,19 @@ describe("imageExtension", () => {
     assert.equal(imageExtension(Buffer.alloc(0)), ".png");
     // "RIFF" alone is a WAV or AVI container, not a WebP image.
     assert.equal(imageExtension(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVE")])), ".png");
+  });
+});
+
+describe("generate_image input schema", () => {
+  const schema = z.object(generateImageInput);
+
+  test("accepts the default model and qwen-image-2.1", () => {
+    assert.equal(schema.safeParse({ prompt: "p" }).success, true);
+    assert.equal(schema.safeParse({ prompt: "p", model: "qwen-image-2.1" }).success, true);
+  });
+
+  test("rejects an unsupported model", () => {
+    assert.equal(schema.safeParse({ prompt: "p", model: "dall-e" }).success, false);
   });
 });
 

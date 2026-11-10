@@ -15,7 +15,7 @@ Al ser un estándar abierto, funciona con **opencode**, **Claude Code**, **Codex
 
 | Herramienta | Descripción | Modelo |
 |---|---|---|
-| `generate_image` | Generar imagen desde texto | `flux-2-klein` |
+| `generate_image` | Generar imagen desde texto | `flux-2-klein` (default) o `qwen-image-2.1` |
 | `edit_image` | Editar imagen (imagen→imagen) | `flux-2-klein` |
 | `text_to_speech` | Sintetizar audio desde texto | `kokoro` |
 | `list_voices` | Listar voces kokoro por idioma | — |
@@ -24,6 +24,13 @@ Al ser un estándar abierto, funciona con **opencode**, **Claude Code**, **Codex
 | `rerank_documents` | Reordenar documentos por relevancia (RAG) | `rerank` |
 | `list_models` | Listar modelos disponibles con tu key | — |
 | `get_quota` | Consultar cuota de tokens por modelo (backend del dashboard, solo lectura) | — |
+
+`generate_image` acepta el parámetro opcional `model`:
+
+- `flux-2-klein` (por defecto): texto→imagen, 256–1536 px.
+- `qwen-image-2.1`: texto→imagen con mejor renderizado de texto dentro de la imagen, 512–1280 px, `seed` entero de 0 a 2147483647 y sin `guidance`. No admite imágenes de referencia; para eso usa `edit_image`, que siempre trabaja con `flux-2-klein`.
+
+Ambos modelos comparten la misma cuota mensual de imágenes.
 
 ## Requisitos
 
@@ -36,21 +43,21 @@ El paquete se distribuye por [npm](https://www.npmjs.com/package/nan-mcp-server)
 
 ```bash
 export NAN_API_KEY="sk-tu-key-aqui"
-npx -y nan-mcp-server@1.3.0
+npx -y nan-mcp-server@1.4.0
 ```
 
 Con otro gestor de paquetes, si ya lo usas:
 
 ```bash
-pnpm dlx nan-mcp-server@1.3.0    # pnpm
-yarn dlx nan-mcp-server@1.3.0    # yarn
-bunx nan-mcp-server@1.3.0        # bun
+pnpm dlx nan-mcp-server@1.4.0    # pnpm
+yarn dlx nan-mcp-server@1.4.0    # yarn
+bunx nan-mcp-server@1.4.0        # bun
 ```
 
 O instálalo globalmente:
 
 ```bash
-npm install -g nan-mcp-server@1.3.0   # o: pnpm add -g / bun add -g
+npm install -g nan-mcp-server@1.4.0   # o: pnpm add -g / bun add -g
 nan-mcp-server
 ```
 
@@ -74,7 +81,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
   "mcp": {
     "nan-media": {
       "type": "local",
-      "command": ["npx", "-y", "nan-mcp-server@1.3.0"],
+      "command": ["npx", "-y", "nan-mcp-server@1.4.0"],
       "environment": {
         "NAN_API_KEY": "{env:NAN_API_KEY}"
       }
@@ -92,7 +99,7 @@ Añade a tu `opencode.jsonc` (o créalo en `~/.config/opencode/`):
 
 ```bash
 claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
-  npx -y nan-mcp-server@1.3.0
+  npx -y nan-mcp-server@1.4.0
 ```
 
 **O en `.mcp.json`:**
@@ -103,7 +110,7 @@ claude mcp add nan-media --scope user -e NAN_API_KEY='${NAN_API_KEY}' -- \
     "nan-media": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.3.0"],
+      "args": ["-y", "nan-mcp-server@1.4.0"],
       "env": {
         "NAN_API_KEY": "${NAN_API_KEY}"
       }
@@ -122,7 +129,7 @@ En `~/.codex/config.toml`:
 ```toml
 [mcp_servers.nan-media]
 command = "npx"
-args = ["-y", "nan-mcp-server@1.3.0"]
+args = ["-y", "nan-mcp-server@1.4.0"]
 env_vars = ["NAN_API_KEY"]
 ```
 
@@ -146,7 +153,7 @@ Crea `~/.config/mcp/mcp.json` (config compartido MCP estándar):
   "mcpServers": {
     "nan-media": {
       "command": "npx",
-      "args": ["-y", "nan-mcp-server@1.3.0"],
+      "args": ["-y", "nan-mcp-server@1.4.0"],
       "env": {
         "NAN_API_KEY": "$env:NAN_API_KEY"
       }
@@ -185,7 +192,7 @@ Luego usa `--provider nan --model <id>` (p.ej. `pi --provider nan --model deepse
 En la configuración de MCP del cliente, añade un servidor stdio:
 
 ```
-Comando: npx -y nan-mcp-server@1.3.0
+Comando: npx -y nan-mcp-server@1.4.0
 Variables: NAN_API_KEY=tu-clave-de-nan-builders (no la incluyas en el config versionado)
 ```
 
@@ -196,6 +203,7 @@ Variables: NAN_API_KEY=tu-clave-de-nan-builders (no la incluyas en el config ver
 Una vez conectado, pide al agente:
 
 - "Genera una imagen de un faro al atardecer con nan-media"
+- "Genera un cartel con la frase «Abierto» usando qwen-image-2.1"
 - "Sintetiza en español: Hola mundo, voz ef_dora"
 - "Transcribe el audio /ruta/audio.mp3"
 - "Reordena estos documentos según la query X"
@@ -204,7 +212,8 @@ Una vez conectado, pide al agente:
 
 | Recurso | Límite |
 |---|---|
-| Generación/edición de imágenes | 100 req/mes por usuario, 1 req/s (burst 3) |
+| Generación/edición de imágenes | 100 req/mes por usuario (pool compartido entre `flux-2-klein` y `qwen-image-2.1`), 20 req/min |
+| Tamaños de imagen | `flux-2-klein`: 256–1536 px; `qwen-image-2.1`: 512–1280 px; ambos múltiplos de 16 y ratio entre 1:3 y 3:1 |
 | Tamaño máximo archivo (STT / edit_image) | 25 MB por archivo |
 | Audios para transcripción | máx. ~2 min por archivo (timeout 524 si supera) |
 | Imágenes de referencia (edit_image) | hasta 4 |
