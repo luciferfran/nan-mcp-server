@@ -5,6 +5,25 @@ Todos los cambios notables de este proyecto se documentan en este archivo.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el versionado [Semantic Versioning](https://semver.org/lang/es/).
 
+## [1.5.0] - 2026-11-13
+
+### Añadido
+
+- Herramienta `get_usage`: consumo real y fondo de créditos desde
+  `GET /v1/usage` (créditos usados/restantes y reinicio; peticiones,
+  tokens de entrada/salida/caché y créditos por modelo; totales).
+  Entrada opcional `start_date`/`end_date` (`YYYY-MM-DD`); por defecto
+  el periodo de créditos actual. Avisa si la respuesta está truncada
+  (`has_more`) en vez de cortarla en silencio. (#18)
+
+### Cambiado
+
+- `get_quota` marca con «counter not updated since YYYY-MM-DD» los
+  modelos cuyo contador va por detrás de la actividad real, y su
+  descripción apunta a `get_usage`. El formato de salida existente no
+  cambia. (#18)
+- Dependencias actualizadas (hono 4.13.18, @hono/node-server 2.1.6).
+
 ## [1.4.0] - 2026-11-10
 
 ### Añadido

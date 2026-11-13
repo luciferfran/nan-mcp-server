@@ -28,6 +28,7 @@ import {
   embedText,
   rerankDocuments,
   getQuota,
+  getUsage,
   fmtTokens,
 } from "../server.js";
 
@@ -330,17 +331,146 @@ describe("handlers with mocked fetch", () => {
   });
 
   test("getQuota reads the cloud backend, not the inference base", async () => {
-    let seenUrl = "";
-    let seenAuth = "";
+    const seen = [];
     mockFetch(async (url, opts) => {
-      seenUrl = url;
-      seenAuth = opts.headers.Authorization;
+      seen.push({ url, auth: opts.headers.Authorization });
       return jsonResponse({ periodStart: "2026-10-01", models: [] });
     });
 
     await getQuota();
-    assert.equal(seenUrl, `${CLOUD_URL}/api/usage/quota`);
-    assert.equal(seenAuth, `Bearer ${API_KEY}`);
+    assert.equal(seen[0].url, `${CLOUD_URL}/api/usage/quota`);
+    assert.equal(seen[0].auth, `Bearer ${API_KEY}`);
+  });
+
+  test("getQuota flags counters that lag behind real activity", async () => {
+    mockFetch(async (url) => {
+      if (url.startsWith(`${BASE_URL}/usage`)) {
+        assert.match(url, /start_date=2026-11-01/);
+        return jsonResponse({
+          data: [
+            { date: "2026-11-04", model: "stale", total_tokens: 10, api_requests: 1 },
+            { date: "2026-11-13", model: "stale", total_tokens: 10, api_requests: 1 },
+            { date: "2026-11-13", model: "fresh", total_tokens: 10, api_requests: 1 },
+          ],
+        });
+      }
+      return jsonResponse({
+        periodStart: "2026-11-01",
+        models: [
+          { model: "stale", tokensUsed: 10, cap: 100, remaining: 90, updatedAt: "2026-11-04T10:00:00Z" },
+          { model: "fresh", tokensUsed: 10, cap: 100, remaining: 90, updatedAt: "2026-11-13T10:00:00Z" },
+        ],
+      });
+    });
+    const text = (await getQuota()).content[0].text;
+    assert.match(text, /stale:.*counter not updated since 2026-11-04/);
+    assert.doesNotMatch(text.split("\n").find((l) => l.startsWith("fresh")), /not updated/);
+  });
+
+  test("getQuota still answers when /v1/usage fails", async () => {
+    mockFetch(async (url) => {
+      if (url.startsWith(`${BASE_URL}/usage`)) return new Response("boom", { status: 500 });
+      return jsonResponse({
+        periodStart: "2026-11-01",
+        models: [{ model: "m", tokensUsed: 10, cap: 100, remaining: 90, updatedAt: "2026-11-04T10:00:00Z" }],
+      });
+    });
+    const text = (await getQuota()).content[0].text;
+    assert.match(text, /^m: 10 \/ 100 used/m);
+    assert.doesNotMatch(text, /not updated/);
+  });
+
+  const USAGE = {
+    object: "usage.report",
+    start_date: "2026-11-01",
+    end_date: "2026-11-13",
+    data: [],
+    totals: {
+      api_requests: 12, prompt_tokens: 3000, completion_tokens: 1500, cached_tokens: 500, total_tokens: 4500, credits: 7.5,
+      by_model: [
+        { model: "small", api_requests: 2, prompt_tokens: 100, completion_tokens: 50, cached_tokens: 0, total_tokens: 150, credits: 0.5 },
+        { model: "big", api_requests: 10, prompt_tokens: 2900, completion_tokens: 1450, cached_tokens: 500, total_tokens: 4350, credits: 7 },
+      ],
+    },
+    has_more: false,
+    next_cursor: null,
+    credits: {
+      period_start: "2026-11-01", period_end: "2026-12-01", allowance: 100, used: 7.5, remaining: 92.5,
+      pack_credits: 0, pack_expires_at: null, frozen: false,
+    },
+  };
+
+  test("getUsage reads /v1/usage under BASE_URL with the key and shows credits first", async () => {
+    const seen = [];
+    mockFetch(async (url, opts) => {
+      seen.push({ url, auth: opts.headers.Authorization });
+      return jsonResponse(USAGE);
+    });
+    const lines = (await getUsage()).content[0].text.split("\n");
+    assert.equal(seen.length, 1, "no second call when the window already starts at the credit period");
+    assert.ok(seen[0].url.startsWith(`${BASE_URL}/usage`));
+    assert.equal(seen[0].auth, `Bearer ${API_KEY}`);
+    assert.equal(lines[0], "Credits: 7.5 / 100 used, 92.5 left — resets 2026-12-01");
+    assert.equal(lines[1], "Usage 2026-11-01 to 2026-11-13:");
+    assert.equal(lines[2], "big: 10 req, 3K in / 1K out / 500 cached, 7 credits");
+    assert.match(lines[3], /^small: 2 req/);
+    assert.match(lines[4], /^TOTAL: 12 req/);
+  });
+
+  test("getUsage re-queries from the credit period when the default window differs", async () => {
+    const urls = [];
+    mockFetch(async (url) => {
+      urls.push(url);
+      return jsonResponse(urls.length === 1 ? { ...USAGE, start_date: "2026-10-14" } : USAGE);
+    });
+    await getUsage();
+    assert.equal(urls.length, 2);
+    assert.match(urls[1], /start_date=2026-11-01/);
+  });
+
+  test("getUsage passes explicit dates and rejects malformed ones", async () => {
+    let seenUrl = "";
+    mockFetch(async (url) => {
+      seenUrl = url;
+      return jsonResponse(USAGE);
+    });
+    await getUsage({ start_date: "2026-11-05", end_date: "2026-11-10" });
+    assert.equal(seenUrl, `${BASE_URL}/usage?start_date=2026-11-05&end_date=2026-11-10`);
+    await assert.rejects(() => getUsage({ start_date: "11/05/2026" }), /start_date must be YYYY-MM-DD/);
+  });
+
+  test("getUsage says so when the response is truncated or the pool is frozen", async () => {
+    mockFetch(async () =>
+      jsonResponse({
+        ...USAGE,
+        has_more: true,
+        next_cursor: "abc",
+        credits: { ...USAGE.credits, frozen: true, pack_credits: 20, pack_expires_at: "2026-12-31T00:00:00Z" },
+      })
+    );
+    const text = (await getUsage()).content[0].text;
+    assert.match(text, /\+20 pack credits \(expire 2026-12-31\) — FROZEN/);
+    assert.match(text, /more rows exist/);
+  });
+
+  test("getUsage aggregates daily rows when totals are missing", async () => {
+    mockFetch(async () =>
+      jsonResponse({
+        start_date: "2026-11-01",
+        end_date: "2026-11-13",
+        data: [
+          { date: "2026-11-01", model: "m", api_requests: 1, prompt_tokens: 10, completion_tokens: 5, cached_tokens: 0, credits: 1 },
+          { date: "2026-11-02", model: "m", api_requests: 2, prompt_tokens: 20, completion_tokens: 5, cached_tokens: 0, credits: 2 },
+        ],
+      })
+    );
+    const text = (await getUsage()).content[0].text;
+    assert.match(text, /^m: 3 req, 30 in \/ 10 out \/ 0 cached, 3 credits$/m);
+  });
+
+  test("getUsage survives an empty period", async () => {
+    mockFetch(async () => jsonResponse({ start_date: "2026-11-01", end_date: "2026-11-13", data: [] }));
+    assert.match((await getUsage()).content[0].text, /No usage in this period/);
   });
 
   test("getQuota formats and orders models worst-first", async () => {
@@ -791,13 +921,14 @@ async function listRegisteredTools(env) {
 }
 
 describe("tool catalog", () => {
-  test("publishes the nine tool names clients depend on", async () => {
+  test("publishes the ten tool names clients depend on", async () => {
     const nombres = await listRegisteredTools();
     assert.deepEqual(nombres.slice().sort(), [
       "edit_image",
       "embed_text",
       "generate_image",
       "get_quota",
+      "get_usage",
       "list_models",
       "list_voices",
       "rerank_documents",
@@ -814,7 +945,7 @@ describe("starting without a key", () => {
     // Exiting at startup made every inspector see a server that dies during
     // the handshake, with nothing to show for it.
     const nombres = await listRegisteredTools(sinClave);
-    assert.equal(nombres.length, 9);
+    assert.equal(nombres.length, 10);
   });
 
   test("warns on stderr without killing the process", async () => {
