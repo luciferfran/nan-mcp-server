@@ -299,8 +299,31 @@ export function fmtTokens(n) {
   return String(Math.round(v));
 }
 
+// Latest day with activity per model, from the /v1/usage daily rows. Used to
+// flag quota counters that stopped updating.
+function lastActivityByModel(rows) {
+  const last = new Map();
+  for (const r of rows || []) {
+    if (!r?.model || !r?.date || !(Number(r.total_tokens) > 0 || Number(r.api_requests) > 0)) continue;
+    if (!last.has(r.model) || r.date > last.get(r.model)) last.set(r.model, r.date);
+  }
+  return last;
+}
+
 export async function getQuota() {
   const json = await nanRequest("/api/usage/quota", { base: CLOUD_URL });
+
+  // Since the move to a credit pool this endpoint returns frozen counters.
+  // Cross-check against /v1/usage (the real consumption) so stale lines can be
+  // flagged; if that call fails the quota still comes back, just unchecked.
+  let activity = new Map();
+  try {
+    const usage = await nanRequest(`/usage?start_date=${json.periodStart ? String(json.periodStart).slice(0, 10) : monthStart()}`);
+    activity = lastActivityByModel(usage.data);
+  } catch {
+    // best-effort only
+  }
+
   const models = (json.models || []).slice().sort(
     (a, b) => (b.tokensUsed || 0) / (b.cap || 1) - (a.tokensUsed || 0) / (a.cap || 1)
   );
@@ -309,12 +332,93 @@ export async function getQuota() {
     let line = `${m.model}: ${fmtTokens(m.tokensUsed)} / ${fmtTokens(m.cap)} used (${pct}%), ${fmtTokens(m.remaining)} left`;
     if (m.windowHours) line += ` — rolling ${m.windowHours}h window of ${fmtTokens(m.fullWindowTokens)}`;
     if (m.periodEnd) line += ` — resets ${String(m.periodEnd).slice(0, 10)}`;
+    const updated = m.updatedAt ? String(m.updatedAt).slice(0, 10) : null;
+    const seen = activity.get(m.model);
+    if (updated && seen && updated < seen) line += ` (counter not updated since ${updated}; use get_usage for real consumption)`;
     return line;
   });
   const text = lines.length
     ? [`Quota period starting ${json.periodStart}:`, ...lines].join("\n")
     : "No quota entries returned";
   return { content: [{ type: "text", text }] };
+}
+
+function monthStart(now = new Date()) {
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Real consumption and the credit pool, from GET /v1/usage (same sk- key, under
+// BASE_URL). Undocumented as of writing, so every field is read defensively.
+export async function getUsage({ start_date, end_date } = {}) {
+  for (const [name, v] of [["start_date", start_date], ["end_date", end_date]]) {
+    if (v !== undefined && !DATE_RE.test(v)) throw new Error(`${name} must be YYYY-MM-DD, got "${v}"`);
+  }
+
+  // Unfiltered the endpoint returns the last 30 days; ask for a start date to
+  // control the window. Without one, resolve it after a first call so the
+  // default is the credit period (or the calendar month) and not a rolling 30d.
+  const query = (start) => {
+    const qs = new URLSearchParams();
+    if (start) qs.set("start_date", start);
+    if (end_date) qs.set("end_date", end_date);
+    const q = qs.toString();
+    return `/usage${q ? `?${q}` : ""}`;
+  };
+
+  let json = await nanRequest(query(start_date));
+  if (!start_date) {
+    const periodStart = json.credits?.period_start ? String(json.credits.period_start).slice(0, 10) : monthStart();
+    if (json.start_date !== periodStart) json = await nanRequest(query(periodStart));
+  }
+
+  const out = [];
+  const c = json.credits;
+  if (c) {
+    let line = `Credits: ${fmtCredits(c.used)} / ${fmtCredits(c.allowance)} used, ${fmtCredits(c.remaining)} left`;
+    if (c.period_end) line += ` — resets ${String(c.period_end).slice(0, 10)}`;
+    if (Number(c.pack_credits) > 0) {
+      line += ` — +${fmtCredits(c.pack_credits)} pack credits`;
+      if (c.pack_expires_at) line += ` (expire ${String(c.pack_expires_at).slice(0, 10)})`;
+    }
+    if (c.frozen) line += " — FROZEN";
+    out.push(line);
+  }
+
+  out.push(`Usage ${json.start_date ?? start_date ?? "?"} to ${json.end_date ?? end_date ?? "?"}:`);
+
+  const byModel = json.totals?.by_model?.length ? json.totals.by_model : aggregateByModel(json.data);
+  const rows = byModel.slice().sort((a, b) => (Number(b.credits) || 0) - (Number(a.credits) || 0));
+  for (const m of rows) out.push(usageLine(m.model, m));
+  if (!rows.length) out.push("No usage in this period");
+  else if (json.totals) out.push(usageLine("TOTAL", json.totals));
+
+  if (json.has_more) {
+    out.push(`Note: more rows exist beyond this response (next_cursor ${json.next_cursor ?? "?"}); narrow start_date/end_date to see them. Totals above may not cover the whole range.`);
+  }
+
+  return { content: [{ type: "text", text: out.join("\n") }] };
+}
+
+function aggregateByModel(data) {
+  const acc = new Map();
+  for (const r of data || []) {
+    const m = acc.get(r.model) || { model: r.model, api_requests: 0, prompt_tokens: 0, completion_tokens: 0, cached_tokens: 0, total_tokens: 0, credits: 0 };
+    for (const k of ["api_requests", "prompt_tokens", "completion_tokens", "cached_tokens", "total_tokens", "credits"]) m[k] += Number(r[k]) || 0;
+    acc.set(r.model, m);
+  }
+  return [...acc.values()];
+}
+
+function usageLine(label, m) {
+  return `${label}: ${m.api_requests ?? 0} req, ${fmtTokens(m.prompt_tokens)} in / ${fmtTokens(m.completion_tokens)} out / ${fmtTokens(m.cached_tokens)} cached, ${fmtCredits(m.credits)} credits`;
+}
+
+function fmtCredits(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "?";
+  return trim1(v);
 }
 
 function trim1(s) {
@@ -458,9 +562,18 @@ server.registerTool("list_models", {
 
 server.registerTool("get_quota", {
   title: "Get Quota",
-  description: "Report the account's token quota per model from the NaN dashboard backend (GET /api/usage/quota): used, cap, remaining and reset date, worst-utilised model first; some models carry a rolling window instead of a monthly cap. Read-only and free — it does not consume quota. Note this is an undocumented route that accepts the same sk- key; it may change without notice.",
+  description: "Report the legacy per-model token quota from the NaN dashboard backend (GET /api/usage/quota): used, cap, remaining and reset date, worst-utilised model first. Since NaN moved to a credit pool these counters can be frozen, and a line is flagged when its counter lags behind real activity; use get_usage for real consumption and the credit balance. Read-only and free. Undocumented route that accepts the same sk- key; it may change without notice.",
   inputSchema: {},
 }, getQuota);
+
+server.registerTool("get_usage", {
+  title: "Get Usage",
+  description: "Report real consumption and the credit pool from NaN (GET /v1/usage): credits used, remaining and reset date, then per-model requests, input/output/cached tokens and credits, with totals. Defaults to the current credit period. Prefer this over get_quota, whose counters can be stale. Read-only and free. Undocumented endpoint that accepts the same sk- key; it may change without notice.",
+  inputSchema: {
+    start_date: z.string().optional().describe("First day, YYYY-MM-DD. Default: start of the current credit period"),
+    end_date: z.string().optional().describe("Last day, YYYY-MM-DD. Default: today"),
+  },
+}, getUsage);
 
 server.registerTool("embed_text", {
   title: "Embed Text",

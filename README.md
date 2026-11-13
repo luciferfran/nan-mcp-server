@@ -23,7 +23,8 @@ Al ser un estándar abierto, funciona con **opencode**, **Claude Code**, **Codex
 | `embed_text` | Embeddings vectoriales (4096 dims) | `qwen3-embedding` |
 | `rerank_documents` | Reordenar documentos por relevancia (RAG) | `rerank` |
 | `list_models` | Listar modelos disponibles con tu key | — |
-| `get_quota` | Consultar cuota de tokens por modelo (backend del dashboard, solo lectura) | — |
+| `get_quota` | Cuota de tokens por modelo (backend del dashboard, solo lectura). Desde el fondo de créditos sus contadores pueden estar congelados; avisa cuando lo detecta | — |
+| `get_usage` | Consumo real y fondo de créditos (`GET /v1/usage`, solo lectura): créditos usados/restantes, y peticiones, tokens y créditos por modelo | — |
 
 `generate_image` acepta el parámetro opcional `model`:
 
