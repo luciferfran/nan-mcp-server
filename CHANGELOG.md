@@ -5,7 +5,7 @@ Todos los cambios notables de este proyecto se documentan en este archivo.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el versionado [Semantic Versioning](https://semver.org/lang/es/).
 
-## [Sin publicar]
+## [1.5.0] - 2026-11-13
 
 ### Añadido
 
@@ -22,6 +22,7 @@ y el versionado [Semantic Versioning](https://semver.org/lang/es/).
   modelos cuyo contador va por detrás de la actividad real, y su
   descripción apunta a `get_usage`. El formato de salida existente no
   cambia. (#18)
+- Dependencias actualizadas (hono 4.13.18, @hono/node-server 2.1.6).
 
 ## [1.4.0] - 2026-11-10
 
