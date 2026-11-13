@@ -3,6 +3,10 @@ node_modules/
 .env
 .env.*
 
+# El lockfile del proyecto es package-lock.json (npm ci en CI y publicación).
+# pnpm solo se usa en el job strict-deps, con --no-frozen-lockfile.
+pnpm-lock.yaml
+
 # Config MCP local: dentro de este repo npx no puede instalar el propio
 # paquete, así que aquí se arranca el server.js del árbol de trabajo.
 .mcp.json
